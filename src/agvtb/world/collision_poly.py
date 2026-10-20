@@ -21,7 +21,7 @@ def state_area(world: World, state: State) -> shapely.Polygon:
     """The area a state takes.
 
     S and L: the footprint at the node. M: the hull of the footprints at both ends, which is what
-    a straight move sweeps. R: the area swept by the turn, see _turn_sweep.
+    a straight move sweeps. R: the area swept by the turn, to the accuracy given in _turn_sweep.
     """
     length_m, width_m = world.footprint.length_m, world.footprint.width_m
     if state.kind in ("S", "L"):
@@ -60,7 +60,11 @@ def _turn_sweep(length_m: float, width_m: float, from_heading: int, to_heading: 
     """The area swept by a vehicle turning on the spot at the origin from from_heading to to_heading.
 
     The turn goes the short way in 1 degree steps, counter-clockwise when it is exactly 180.
-    The area is the union of the hull of every two successive footprints.
+    The area is the union of the hull of every two successive footprints. That is an approximation,
+    neither exact nor inside the true sweep. For the 0.5 m square, between steps the hull over-covers
+    by up to about 2.2 mm (it fills the notch where the edges of neighbouring footprints cross), and at
+    the corner arcs it under-covers by r (1 - cos 0.5 deg), about 0.0135 mm, r being the half diagonal.
+    No songdo pair is affected: nothing lies within 2 cm.
     """
     steps = shortest_turn_deg(from_heading, to_heading)
     if steps == 0:

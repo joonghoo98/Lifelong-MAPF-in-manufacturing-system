@@ -21,8 +21,9 @@ def grid_pitch(world: World) -> float:
 def check_grid_rule(world: World) -> None:
     """Raise GridRuleError unless the cell rule holds for this world.
 
-    The cell rule takes vehicles on different nodes as never touching. That needs the vehicle
-    diagonal to be no longer than the pitch, and the map to be a lattice (see _check_lattice).
+    The cell rule takes vehicles on different nodes as never touching. A vehicle diagonal no longer
+    than the pitch is necessary for that: turns at adjacent nodes overlap when the diagonal is longer.
+    It is sufficient only on a lattice, which _check_lattice checks.
     """
     diagonal = math.hypot(world.footprint.length_m, world.footprint.width_m)
     pitch = grid_pitch(world)

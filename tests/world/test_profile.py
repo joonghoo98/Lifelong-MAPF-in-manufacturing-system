@@ -62,12 +62,12 @@ def _edited_profile(cfg, tmp_path, edit):
     return path
 
 def test_profile_states_are_read_as_given(kairos):
-    # with no port nodes there is no L and only the profile is left: the ids in the file's order,
-    # next, durations (an S has none) and conflicts, all as in the file
+    # with no port nodes there is no L and only the profile is left: the ids in sorted order (the loader
+    # sorts them, whatever the file's order), next, durations (an S has none) and conflicts as in the file
     w, mf, cfg, g, c = kairos
     g0, c0 = load_collision_profile(replace(w, port_nodes=()), mf, cfg.profile_path)
     raw = json.loads(cfg.profile_path.read_text(encoding="utf-8"))["states"]
-    assert list(g0) == list(raw) and list(c0) == list(raw)
+    assert list(g0) == sorted(raw) and list(c0) == sorted(raw)
     assert {sid: list(st.next) for sid, st in g0.items()} == {sid: r["next"] for sid, r in raw.items()}
     assert {sid: st.duration_s for sid, st in g0.items()} == {sid: r["duration"] for sid, r in raw.items()}
     assert {sid: set(bs) for sid, bs in c0.items()} == {sid: set(r["conflicts"]) for sid, r in raw.items()}

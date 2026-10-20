@@ -23,7 +23,14 @@ class State:
 
 
 StateGraph = dict[str, State]  # sid -> State
-Conflicts = dict[str, frozenset[str]]  # sid -> sids it collides with, never itself
+
+# sid -> the sids it collides with. Every builder of conflicts keeps this contract:
+# - every state of the graph is a key (the set is empty when nothing collides with it);
+# - a set never holds its own key: self-collision is implicit, as in the profile's rule
+#   "a == b or b in a.conflicts";
+# - symmetric: b is in conflicts[a] if and only if a is in conflicts[b];
+# - a frozenset has no order, so sort it before iterating wherever the output must be deterministic.
+Conflicts = dict[str, frozenset[str]]
 
 
 def shortest_turn_deg(h1: int, h2: int) -> int:
