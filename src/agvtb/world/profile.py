@@ -1,7 +1,8 @@
 """Read a collision-v1 profile: the states and conflict sets of a map, as the profile gives them.
 
 KAIROS_AMR ships these (D14). They are used as they are, once the profile is shown to be made for
-the very map file in use. L states are not in the profile; they are added here.
+the very map file in use and to agree with the world on every duration. L states are not in the
+profile; they are added here.
 """
 import json
 from dataclasses import replace
@@ -13,10 +14,11 @@ from agvtb.world.states import Conflicts, State, StateGraph, shortest_turn_deg
 
 _SCHEMA = "collision-v1"
 _TOLERANCE_S = 1e-6  # durations closer than this count as equal
+_SHOWN_MISMATCHES = 3  # duration mismatches quoted in the error message
 
 
 class ProfileMismatchError(ValueError):
-    """The profile was not made for this map file, or is not a readable collision-v1 profile."""
+    """The profile does not fit this map, this world or the contract, or is not readable collision-v1."""
 
 
 def load_collision_profile(
@@ -24,8 +26,11 @@ def load_collision_profile(
 ) -> tuple[StateGraph, Conflicts]:
     """The states and conflict sets of a profile, with an L state added for each S at a port.
 
-    Raises ProfileMismatchError if the profile is not collision-v1 or if its map_sha256 is not the
-    SHA-256 of the map file mf. The keys of both results and every next tuple are in sorted order.
+    Raises ProfileMismatchError if the profile is not collision-v1, if its map_sha256 is not the
+    SHA-256 of the map file mf, if it breaks the contract of a graph and its conflicts (see
+    _check_contract), or if an M or R duration differs from the world's (see
+    check_profile_durations): the graph must not contradict its own World. The keys of both results
+    and every next tuple are in sorted order.
     """
     where = profile_path.name
     data = json.loads(profile_path.read_bytes())
@@ -43,8 +48,16 @@ def load_collision_profile(
     for sid, raw in data["states"].items():
         states[sid] = _read_state(where, sid, raw)
         conflicts[sid] = set(raw["conflicts"])
+    _check_contract(where, world, states, conflicts)
     _add_load_states(world, states, conflicts)
     graph = {sid: states[sid] for sid in sorted(states)}
+    problems = check_profile_durations(world, graph)
+    if problems:
+        shown = problems[:_SHOWN_MISMATCHES]
+        raise ProfileMismatchError(
+            f"{where}: {len(problems)} durations disagree with the world, first {len(shown)}: "
+            + "; ".join(shown)
+        )
     return graph, {sid: frozenset(conflicts[sid]) for sid in graph}
 
 
@@ -53,7 +66,8 @@ def check_profile_durations(world: World, graph: StateGraph) -> list[str]:
 
     M: segment length / speed. R: shortest turn / 90 * rotation time. S and L are not checked: an S
     lasts as long as the vehicle waits and an L as long as the dwell time. An M without a segment
-    in the world is reported too. An empty list means that all durations agree.
+    in the world, and an M or R without a duration, are reported too. An empty list means that all
+    durations agree.
     """
     problems = []
     for sid, st in graph.items():
@@ -68,9 +82,44 @@ def check_profile_durations(world: World, graph: StateGraph) -> list[str]:
             expected = turn / 90 * world.rotation_s_per_90deg
         else:
             continue
-        if abs(st.duration_s - expected) > _TOLERANCE_S:
+        if st.duration_s is None:
+            problems.append(f"{sid}: no duration, the world gives {expected:.9g} s")
+        elif abs(st.duration_s - expected) > _TOLERANCE_S:
             problems.append(f"{sid}: duration {st.duration_s:.9g} s, the world gives {expected:.9g} s")
     return problems
+
+
+def _check_contract(
+    where: str, world: World, states: dict[str, State], conflicts: dict[str, set[str]]
+) -> None:
+    """Raise ProfileMismatchError unless the states and conflicts read from the file hold together.
+
+    Every node a state names is in the world; every next and conflict id is a state of the profile;
+    no state conflicts with itself (that is implicit); conflicts are symmetric. Run before the L
+    states are added, as those are built on this contract.
+    """
+    for sid, st in states.items():
+        for node in st.nodes:
+            if node not in world.nodes:
+                raise ProfileMismatchError(f"{where}: state {sid}: node {node!r} is not in the world")
+        for following in st.next:
+            if following not in states:
+                raise ProfileMismatchError(
+                    f"{where}: state {sid}: next {following!r} is not a state of the profile"
+                )
+        for other in sorted(conflicts[sid]):  # a set: sorted, so the first fault found is always the same
+            if other not in states:
+                raise ProfileMismatchError(
+                    f"{where}: state {sid}: conflict {other!r} is not a state of the profile"
+                )
+        if sid in conflicts[sid]:
+            raise ProfileMismatchError(f"{where}: state {sid}: conflicts with itself")
+    for sid in states:
+        for other in sorted(conflicts[sid]):
+            if sid not in conflicts[other]:
+                raise ProfileMismatchError(
+                    f"{where}: conflicts are not symmetric: {sid} lists {other!r}, which does not list {sid}"
+                )
 
 
 def _read_state(where: str, sid: str, raw: dict) -> State:

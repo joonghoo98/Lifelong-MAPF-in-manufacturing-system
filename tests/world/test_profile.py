@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 
 from agvtb.world.config import load_map_config
+from agvtb.world.loader import load_world
 from agvtb.world.mapfile import load_xmsmap
 from agvtb.world.model import build_world
 from agvtb.world.profile import ProfileMismatchError, check_profile_durations, load_collision_profile
@@ -190,8 +191,51 @@ def test_output_order_does_not_depend_on_the_file_order(kairos, tmp_path):
     (lambda data: data.update(schema="collision-v2"), "schema must be 'collision-v1', got 'collision-v2'"),
     (lambda data: data["states"]["S,na.1,0"].update(type="X"), "state S,na.1,0: unknown type 'X'"),
     (lambda data: data["states"]["M,na.1,na.2"].update(next=["S,na.1,0"]), "state M,na.1,na.2: next 'S,na.1,0' is not a stop at na.2"),
-], ids=["no map_sha256", "other schema", "unknown state type", "M next is not a stop at its end node"])
+    # the contract: ids that name nothing, a state against itself, one-sided conflicts, nodes the world lacks
+    (lambda data: data["states"]["S,na.1,0"]["next"].append("M,na.1,nowhere"),
+     "state S,na.1,0: next 'M,na.1,nowhere' is not a state of the profile"),
+    (lambda data: data["states"]["S,na.1,0"]["conflicts"].append("S,nowhere,0"),
+     "state S,na.1,0: conflict 'S,nowhere,0' is not a state of the profile"),
+    (lambda data: data["states"]["S,na.1,0"]["conflicts"].append("S,na.1,0"),
+     "state S,na.1,0: conflicts with itself"),
+    (lambda data: data["states"]["M,na.1,na.2"]["conflicts"].remove("S,na.1,0"),  # S,na.1,0 still lists the M
+     "conflicts are not symmetric: S,na.1,0 lists 'M,na.1,na.2', which does not list S,na.1,0"),
+    (lambda data: data["states"]["S,na.1,0"].update(node="na.nowhere"),
+     "state S,na.1,0: node 'na.nowhere' is not in the world"),
+    (lambda data: data["states"]["M,na.1,na.2"].update({"from": "na.nowhere"}),
+     "state M,na.1,na.2: node 'na.nowhere' is not in the world"),
+], ids=["no map_sha256", "other schema", "unknown state type", "M next is not a stop at its end node",
+        "next names no state", "conflict names no state", "state conflicts with itself",
+        "conflicts are one-sided", "S node is not in the world", "M node is not in the world"])
 def test_unusable_profile_raises(kairos, tmp_path, edit, message):
     w, mf, cfg, g, c = kairos
     with pytest.raises(ProfileMismatchError, match=message):
         load_collision_profile(w, mf, _edited_profile(cfg, tmp_path, edit))
+
+def test_rotation_time_of_the_config_must_match_the_profile(kairos, tmp_path):
+    # the reviewer's probe: the config says 1.0 s per 90 degrees but the profile's 510 R durations are made for
+    # 2.5 s. The graph would contradict its own World, so it is refused. The message gives the count and the first lines.
+    w, mf, cfg, g, c = kairos
+    config = json.loads((CONFIGS / "KAIROS_AMR.json").read_text(encoding="utf-8"))
+    config.update(map=str(cfg.map_path.resolve()), profile=str(cfg.profile_path.resolve()), rotation_s_per_90deg=1.0)
+    path = tmp_path / "KAIROS_turns_fast.json"; path.write_text(json.dumps(config), encoding="utf-8")
+    lines = check_profile_durations(replace(w, rotation_s_per_90deg=1.0), g)
+    assert len(lines) == 510
+    with pytest.raises(ProfileMismatchError, match="510 durations disagree with the world") as err:
+        load_world(path)
+    message = str(err.value)
+    assert lines[0] in message and lines[2] in message and lines[3] not in message  # only the first few are shown
+
+def test_segment_speeds_must_match_the_profile(kairos):
+    # the same for M: speeds twice the profile's make all 130 M durations wrong
+    w, mf, cfg, g, c = kairos
+    faster = {key: replace(seg, speed_mps=seg.speed_mps * 2) for key, seg in w.segments.items()}
+    with pytest.raises(ProfileMismatchError, match="130 durations disagree with the world.*M,na.1,na.2: duration 15.01 s"):
+        load_collision_profile(replace(w, segments=faster), mf, cfg.profile_path)
+
+def test_check_profile_durations_reports_a_missing_duration(kairos):
+    # an M or R without a duration is a line, not a TypeError
+    w, mf, cfg, g, c = kairos
+    m, r = g["M,na.1,na.2"], g["R,na.10,0,180"]
+    lines = check_profile_durations(w, {**g, m.sid: replace(m, duration_s=None), r.sid: replace(r, duration_s=None)})
+    assert lines == ["M,na.1,na.2: no duration, the world gives 15.01 s", "R,na.10,0,180: no duration, the world gives 5 s"]
