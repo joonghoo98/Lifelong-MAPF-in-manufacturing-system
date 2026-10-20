@@ -9,6 +9,8 @@ from agvtb.world.model import World, build_world
 REPO = Path(__file__).resolve().parents[1]
 GRID_MAP = REPO.parent / "grid_map"
 CONFIGS = REPO / "configs" / "maps"
+DAIM = REPO.parent / "DAIM_simulation" / "DAIM_simulation"
+DAIM_ENGINES = DAIM / "experiments" / "results" / "songdo_placement_engines"
 
 
 def tiny_map_data(vehicle_m: float = 0.5) -> dict:
