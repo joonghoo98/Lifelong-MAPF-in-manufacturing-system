@@ -40,6 +40,22 @@ def test_rejects_bad_value(tmp_path, key, value):
     with pytest.raises(ConfigError, match=key):
         load_map_config(path)
 
+@pytest.mark.parametrize("key", ["units_per_meter", "accel_mps2", "decel_mps2", "rotation_s_per_90deg", "dwell_s"])
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), 10 ** 400], ids=["inf", "-inf", "int beyond float"])
+def test_rejects_non_finite_number(tmp_path, key, value):
+    # json parses Infinity, and an int too big for a float is as unusable as one
+    path = _edit(tiny_config(tmp_path), **{key: value})
+    with pytest.raises(ConfigError, match=f"{key} must be finite"):
+        load_map_config(path)
+
+def test_rejects_the_json_literal_1e999(tmp_path):
+    # 1e999 is a plain number to the json module, and it comes out as infinity
+    path = tiny_config(tmp_path)
+    path.write_text(path.read_text(encoding="utf-8").replace('"units_per_meter": 1.0', '"units_per_meter": 1e999'),
+                    encoding="utf-8")
+    with pytest.raises(ConfigError, match="units_per_meter must be finite, got inf"):
+        load_map_config(path)
+
 def test_dwell_zero_is_legal(tmp_path):
     # The design spec (section 15) anticipates a later run without dwell.
     cfg = load_map_config(_edit(tiny_config(tmp_path), dwell_s=0))

@@ -41,6 +41,24 @@ def _write_map(tmp_path, mutation):
         data["segments"][0]["parts"] = [{"kind": "Arc"}]
     elif mutation == "bad_port":
         data["ports"][0]["nodeId"] = "Z"
+    elif mutation == "duplicate_node":  # a second B, far from the first
+        data["nodes"].append({"id": "B", "x": 7.0, "y": 7.0})
+    elif mutation == "comma_in_id":  # C is renamed "C,D" everywhere, so nothing else is wrong
+        nodes["C"]["id"] = "C,D"
+        data["segments"][2]["endNodeId"] = data["segments"][3]["startNodeId"] = "C,D"
+        data["ports"][0]["nodeId"] = "C,D"
+    elif mutation in ("infinite_x", "nan_y", "huge_int_x"):  # huge_int_x: an int no float can hold
+        key, value = {"infinite_x": ("x", float("inf")), "nan_y": ("y", float("nan")),
+                      "huge_int_x": ("x", 10 ** 400)}[mutation]
+        nodes["C"][key] = value
+    elif mutation in ("speed_zero", "speed_negative", "speed_infinite", "speed_nan"):
+        data["segments"][1]["speed"] = {"speed_zero": 0, "speed_negative": -0.5,
+                                        "speed_infinite": float("inf"), "speed_nan": float("nan")}[mutation]
+    elif mutation == "no_segments":
+        data["segments"] = []
+    elif mutation == "port_on_untouched_node":  # D lies on no segment, and port P2 sits on D
+        data["nodes"].append({"id": "D", "x": 5.0, "y": 5.0})
+        data["ports"].append({"id": "P2", "nodeId": "D"})
     else:
         raise ValueError(f"unknown mutation {mutation!r}")
     path = tmp_path / "bad_map.json"
@@ -48,13 +66,28 @@ def _write_map(tmp_path, mutation):
     return path
 
 @pytest.mark.parametrize("mutation, message", [
-    ("unknown_node", "unknown node"), ("zero_length", "zero-length"),
-    ("duplicate", "duplicate"), ("arc", "arc"), ("bad_port", "port"),
+    ("unknown_node", r"segment 1: unknown node 'Z'"),
+    ("zero_length", r"segment 3: zero-length \(B -> C\)"),
+    ("duplicate", r"segment 5: duplicate of segment 1 \(A -> B\)"),
+    ("arc", r"segment 1: arc parts are not supported"),
+    ("bad_port", r"port P1: unknown node 'Z'"),
+    ("duplicate_node", r"node B: duplicate node id"),
+    ("comma_in_id", r"node C,D: id must not contain ','"),
+    ("infinite_x", r"node C: coordinates must be finite, got \(inf, 1.0\)"),
+    ("nan_y", r"node C: coordinates must be finite, got \(1.0, nan\)"),
+    ("huge_int_x", r"node C: coordinates must be finite"),
+    ("speed_zero", r"segment 2: speed must be finite and > 0, got 0$"),
+    ("speed_negative", r"segment 2: speed must be finite and > 0, got -0\.5$"),
+    ("speed_infinite", r"segment 2: speed must be finite and > 0, got inf$"),
+    ("speed_nan", r"segment 2: speed must be finite and > 0, got nan$"),
+    ("no_segments", r"bad_map\.json: the map has no segments"),
+    ("port_on_untouched_node", r"port P2: node 'D' is touched by no segment"),
 ])
 def test_rejects_bad_maps(tmp_path, mutation, message):
     # 3 노드 A(0,0) · B(1,0) · C(1,1), A↔B · B↔C 양방향, 포트 C 인 맵을 쓰고 mutation 하나를 넣는다:
     # unknown_node: 세그먼트 끝을 "Z" 로 · zero_length: C 를 B 와 같은 좌표로 · duplicate: A→B 를 한 번 더 ·
     # arc: A→B 에 "parts": [{"kind": "Arc"}] · bad_port: 포트 nodeId 를 "Z" 로
+    # (the first five; the others are listed in _write_map). Each message names the id of the problem.
     path = _write_map(tmp_path, mutation)
     with pytest.raises(MapFormatError, match=message):
         load_xmsmap(path)

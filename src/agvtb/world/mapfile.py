@@ -5,6 +5,7 @@ homes, direction, parameters, ...) are ignored (D15).
 """
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,20 +51,55 @@ class MapFile:
 
 
 def load_xmsmap(path: str | Path) -> MapFile:
-    """Load an xMSmap file and check it; every number stays in map units."""
+    """Load an xMSmap file and check it; every number stays in map units.
+
+    Raises MapFormatError naming the node, segment or port at fault: a duplicate node id, a comma in
+    a node id, a coordinate that is not finite, a segment with an unknown node, zero length, arc
+    parts, a repeated (start, end) or a speed that is not finite and > 0, a map with no segments,
+    a port on an unknown node or on a node no segment touches.
+    """
     path = Path(path)
     raw = path.read_bytes()
     data = json.loads(raw)
-    nodes = {n["id"]: (float(n["x"]), float(n["y"])) for n in data["nodes"]}
+    nodes = _read_nodes(data["nodes"])
+    segments = _read_segments(data["segments"], nodes)
+    if not segments:
+        raise MapFormatError(f"{path.name}: the map has no segments")
     return MapFile(
         path=path,
         sha256=hashlib.sha256(raw).hexdigest(),
         nodes=nodes,
-        segments=_read_segments(data["segments"], nodes),
-        ports=_read_ports(data["ports"], nodes),
+        segments=segments,
+        ports=_read_ports(data["ports"], nodes, segments),
         vehicle=_read_vehicle(data["vehicleModels"][0]),
         info=data.get("info", {}),
     )
+
+
+def _finite(value) -> float | None:
+    """value as a float, or None when it is NaN, an infinity or an int too big for a float."""
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _read_nodes(items: list[dict]) -> dict[str, tuple[float, float]]:
+    nodes: dict[str, tuple[float, float]] = {}
+    for item in items:
+        node_id = item["id"]
+        if node_id in nodes:
+            raise MapFormatError(f"node {node_id}: duplicate node id")
+        if "," in str(node_id):  # state ids are comma-separated: "M,u,v" must read one way only
+            raise MapFormatError(f"node {node_id}: id must not contain ','")
+        x, y = _finite(item["x"]), _finite(item["y"])
+        if x is None or y is None:
+            raise MapFormatError(
+                f"node {node_id}: coordinates must be finite, got ({item['x']!r}, {item['y']!r})"
+            )
+        nodes[node_id] = (x, y)
+    return nodes
 
 
 def _read_segments(
@@ -85,19 +121,29 @@ def _read_segments(
                 f"segment {seg_id}: duplicate of segment {seen[(start, end)]} ({start} -> {end})"
             )
         seen[(start, end)] = seg_id
+        speed = _finite(item["speed"])
+        if speed is None or speed <= 0:  # duration = length / speed: 0 divides by zero, below 0 gives negative time
+            raise MapFormatError(
+                f"segment {seg_id}: speed must be finite and > 0, got {item['speed']!r}"
+            )
         heading = item.get("heading")
         offset = heading[0]["degree"] if heading else 0
-        segments.append(RawSegment(seg_id, start, end, float(item["speed"]), float(offset)))
+        segments.append(RawSegment(seg_id, start, end, speed, float(offset)))
     return tuple(segments)
 
 
 def _read_ports(
-    items: list[dict], nodes: dict[str, tuple[float, float]]
+    items: list[dict], nodes: dict[str, tuple[float, float]], segments: tuple[RawSegment, ...]
 ) -> tuple[RawPort, ...]:
+    touched = {node_id for seg in segments for node_id in (seg.start, seg.end)}
     ports = []
     for item in items:
         if item["nodeId"] not in nodes:
             raise MapFormatError(f"port {item['id']}: unknown node {item['nodeId']!r}")
+        if item["nodeId"] not in touched:  # such a port would get no S and no L state
+            raise MapFormatError(
+                f"port {item['id']}: node {item['nodeId']!r} is touched by no segment"
+            )
         ports.append(RawPort(item["id"], item["nodeId"]))
     return tuple(ports)
 

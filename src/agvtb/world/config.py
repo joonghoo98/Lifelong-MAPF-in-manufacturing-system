@@ -1,5 +1,6 @@
 """Read a per-map config JSON: map file, scale, motion values, collision mode."""
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,10 +67,16 @@ def _text(data: dict, key: str, where: str) -> str:
 
 
 def _number(data: dict, key: str, where: str, *, zero_ok: bool = False) -> float:
-    """data[key] as a float, > 0 (>= 0 with zero_ok)."""
+    """data[key] as a float, finite and > 0 (>= 0 with zero_ok)."""
     value = data[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"{where}: {key} must be a number, got {value!r}")
-    if not (value >= 0 if zero_ok else value > 0):  # written as "not", so NaN fails too
+    try:
+        number = float(value)
+    except OverflowError:  # an int too big for a float
+        number = math.inf
+    if not math.isfinite(number):  # json reads Infinity and 1e999 as inf, and NaN as nan
+        raise ConfigError(f"{where}: {key} must be finite, got {value!r}")
+    if not (number >= 0 if zero_ok else number > 0):
         raise ConfigError(f"{where}: {key} must be {'>= 0' if zero_ok else '> 0'}, got {value!r}")
-    return float(value)
+    return number
