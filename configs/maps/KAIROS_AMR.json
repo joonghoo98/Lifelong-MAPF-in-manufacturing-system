@@ -1,0 +1,11 @@
+{
+  "name": "KAIROS_AMR",
+  "map": "../../../grid_map/KAIROS_AMR/KAIROS_AMR.map.json",
+  "units_per_meter": 1000,
+  "accel_mps2": 0.5,
+  "decel_mps2": 0.5,
+  "rotation_s_per_90deg": 2.5,
+  "dwell_s": 10.0,
+  "collision": "profile",
+  "profile": "../../../grid_map/KAIROS_AMR/KAIROS_AMR.map_collision.json"
+}

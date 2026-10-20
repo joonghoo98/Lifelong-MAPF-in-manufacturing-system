@@ -1,0 +1,10 @@
+{
+  "name": "random_32_32_20",
+  "map": "../../../grid_map/random_32_32_20/random_32_32_20_xMSmap.json",
+  "units_per_meter": 20,
+  "accel_mps2": 0.5,
+  "decel_mps2": 0.5,
+  "rotation_s_per_90deg": 2.5,
+  "dwell_s": 10.0,
+  "collision": "grid"
+}

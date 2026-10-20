@@ -1,0 +1,10 @@
+{
+  "name": "mini_deadend",
+  "map": "../../../grid_map/mini_deadend/mini_deadend_xMSmap.json",
+  "units_per_meter": 16.14,
+  "accel_mps2": 0.5,
+  "decel_mps2": 0.5,
+  "rotation_s_per_90deg": 2.5,
+  "dwell_s": 10.0,
+  "collision": "grid"
+}
