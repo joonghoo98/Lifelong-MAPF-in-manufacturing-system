@@ -1,0 +1,10 @@
+{
+  "name": "grid_songdo_greedy",
+  "map": "../../../../DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_greedy.json",
+  "units_per_meter": 1000,
+  "accel_mps2": 0.5,
+  "decel_mps2": 0.5,
+  "rotation_s_per_90deg": 1.0,
+  "dwell_s": 10.0,
+  "collision": "grid"
+}
