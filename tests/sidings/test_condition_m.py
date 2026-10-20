@@ -166,9 +166,17 @@ def test_the_round_trip_needs_both_ways(tmp_path):  # :196-198, a port pose in t
     assert "c00" in rep.violations[0] and "c11" in rep.violations[1] and all("c20" in v for v in rep.violations)
 
 def test_violations_come_in_the_documented_order(tmp_path):  # ports outside the aisle, ports without a load pose, sidings
+    # c90 stands on an island, so it is outside the aisle. c10 is in the aisle but is no port of the map, so it has no
+    # load state. From each siding the round trip to c90 fails. The three kinds name other ids, so a swap of two shows.
+    lw = loaded(tmp_path, SPURS + [("c90", "c91")], ["c00", "c50", "c90"], "order")
+    rep = check_condition_m(lw.graph, lw.conflicts, ["c00", "c10", "c50", "c90"], ["c03", "c23", "c43"], 2)
+    assert [v.split()[1].rstrip(":") for v in rep.violations] == ["c90", "c10", "c03", "c23", "c43"]  # "port <id> ", "siding <id>: "
+    assert "outside the aisle" in rep.violations[0] and "no stop pose with a load state" in rep.violations[1]
+    assert all(v.startswith("siding ") and "['c90']" in v for v in rep.violations[2:])
+    # within a kind the ports go by id, whatever order they come in: the two that are no nodes are outside the aisle and have
+    # no load pose, the other ports and the sidings pass
     lw = loaded(tmp_path, SPURS, ["c00", "c50"], "spurs")
     rep = check_condition_m(lw.graph, lw.conflicts, ["zz", "c50", "yy", "c00"], ["c03", "c23", "c43"], 2)
-    # the two ports that are no nodes are outside the aisle and have no load pose; the other ports and the sidings pass
     assert [v.split()[1] for v in rep.violations] == ["yy", "zz", "yy", "zz"]  # each line starts "port <id>"
 
 def test_siding_whose_stop_poses_are_all_blocked(tmp_path):  # :192-194

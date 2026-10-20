@@ -32,6 +32,8 @@ def test_kairos_has_only_the_strict_row():
     res = map_rows(load_world(CONFIGS / "KAIROS_AMR.json"))
     assert [r["variant"] for r in res.rows] == ["strict"] and res.rows[0]["sidings"] == 14
     assert any("grid rule skipped" in n and "KAIROS_AMR" in n for n in res.notes)
+    (note,) = res.notes  # the reason says what is wrong with the map, not with one of its ports
+    assert note.startswith("grid rule skipped: KAIROS_AMR: 59 of 61 nodes are off the 1.501 m lattice of na.44 (46 are no port), ")
 
 def test_recorded_row_and_fleet(tmp_path):
     links = [(f"c{x}{y}", f"c{x + 1}{y}") for x in range(5) for y in range(3)] + \
@@ -138,7 +140,7 @@ def test_the_vehicles_argument_beats_the_fleet_and_zero_is_a_value(tmp_path):
     with pytest.raises(ValueError, match="-1"):
         map_rows(lw, -1)
 
-@pytest.mark.parametrize("fleet", [{}, {"AGV": 3}, None, "many"])
+@pytest.mark.parametrize("fleet", [{}, {"AGV": 3}, {"AMR": None}, None, "many"])  # DAIM reads {"AMR": null} as 0 too (safe_tail_map.py:223)
 def test_no_vehicle_count_in_the_map_means_zero(tmp_path, fleet):
     info = {} if fleet is None else {"fleet": fleet}
     assert {r["n_vehicles"] for r in map_rows(spurs(tmp_path, info)).rows} == {0}
@@ -253,3 +255,103 @@ def test_cli_runs_as_a_module_and_ignores_the_hash_seed(tmp_path):
     assert names[0] == names[1] and len(names[0]) == 2 + 9 + 2  # the table twice, nine lists, two figures
     for name in names[0]:
         assert (outs[0] / name).read_bytes() == (outs[1] / name).read_bytes(), name
+
+# Fixes after the final review of the whole branch (F1: map names, F4: the info block, F5: the output folder).
+
+def test_cli_refuses_two_configs_with_one_map_name_and_writes_nothing(tmp_path, capsys):
+    # the folder of a map is named after the map: the lists and figures of the second of two same-named maps would
+    # overwrite those of the first. The check comes before any map is run, so that nothing is left behind
+    out = tmp_path / "out"
+    first = CONFIGS / "mini_deadend.json"
+    spurs(tmp_path, name="spurs")  # writes spurs.json and its map into tmp_path
+    middle = tmp_path / "spurs.json"
+    loaded(tmp_path, room(3, 2), ["c00", "c20"], "mini_deadend")  # another map with the name of the first, in a config of its own
+    last = tmp_path / "mini_deadend.json"
+    with pytest.raises(SystemExit) as stop:
+        sidings_table.main([str(first), str(middle), str(last), "--out", str(out)])
+    captured = capsys.readouterr()
+    assert stop.value.code == 2
+    assert "'mini_deadend'" in captured.err and str(first) in captured.err and str(last) in captured.err
+    assert str(middle) not in captured.err  # the maps that are not repeated are not named
+    assert captured.out == "" and not out.exists()  # no map was run and nothing was written
+
+def test_cli_takes_maps_with_different_names_whatever_their_config_files_are_called(tmp_path, capsys):
+    # the same config file name in two folders is no clash: the folder goes by the name inside the config
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    loaded(tmp_path / "a", room(3, 2), ["c00", "c20"], "first")
+    loaded(tmp_path / "b", room(3, 2), ["c00", "c20"], "second")
+    (tmp_path / "a" / "first.json").rename(tmp_path / "a" / "same.json")
+    (tmp_path / "b" / "second.json").rename(tmp_path / "b" / "same.json")
+    out = tmp_path / "out"
+    configs = [str(tmp_path / "a" / "same.json"), str(tmp_path / "b" / "same.json")]
+    assert sidings_table.main([*configs, "--out", str(out)]) == 0
+    assert capsys.readouterr().out == "first: 9 variants\nsecond: 9 variants\n"
+    assert (out / "first" / "strict.json").is_file() and (out / "second" / "strict.json").is_file()
+
+# F4: the info block of the map file is checked before any rule runs. The ValueError names the map.
+
+@pytest.mark.parametrize("count", ["3", 2.5, 3.0, True, [3], {"n": 3}])  # none is an int; 3.0 is not one even if it is whole
+def test_a_fleet_count_that_is_no_integer_is_refused_with_the_map_name(tmp_path, count):
+    lw = spurs(tmp_path, {"fleet": {"AMR": count}})
+    with pytest.raises(ValueError) as err:
+        map_rows(lw)
+    assert str(err.value).startswith("spurs: ") and "info.fleet.AMR" in str(err.value) and repr(count) in str(err.value)
+    assert {r["n_vehicles"] for r in map_rows(lw, 4).rows} == {4}  # the argument beats the fleet, which is then not read
+
+@pytest.mark.parametrize("sidings", ["c03", 3, True, {"c03": 1}])  # a str would be read as its characters
+def test_recorded_sidings_that_are_no_list_are_refused_with_the_map_name(tmp_path, sidings):
+    lw = spurs(tmp_path, {"sidings": sidings})
+    with pytest.raises(ValueError) as err:
+        map_rows(lw)
+    assert str(err.value).startswith("spurs: ") and "info.sidings" in str(err.value) and repr(sidings) in str(err.value)
+
+def test_null_recorded_sidings_are_no_record_but_an_empty_list_is_one(tmp_path):
+    rows = map_rows(spurs(tmp_path, {"sidings": None})).rows
+    assert [r["variant"] for r in rows] == GRID_NAMES + ["strict"]  # no "recorded" row, as if the map had none
+    rec = map_rows(spurs(tmp_path, {"sidings": []}, name="empty")).rows[-1]
+    assert (rec["variant"], rec["candidates"], rec["sidings"]) == ("recorded", 0, 0)
+
+# the map says -1 / the argument says -1 / the map says 2 and the argument -3, which is the one that counts
+@pytest.mark.parametrize("fleet_amr, n_vehicles", [(-1, None), (None, -1), (2, -3)])
+def test_a_negative_vehicle_count_is_refused_with_the_map_name_before_any_rule_runs(tmp_path, monkeypatch, fleet_amr, n_vehicles):
+    def no_rule(*args, **kwargs):
+        raise AssertionError("a rule was run")
+
+    for rule in ("lattice_grid", "strict_sidings_of_world", "check_condition_m"):
+        monkeypatch.setattr(sidings_table, rule, no_rule)
+    lw = spurs(tmp_path, {} if fleet_amr is None else {"fleet": {"AMR": fleet_amr}})
+    expected = n_vehicles if n_vehicles is not None else fleet_amr
+    with pytest.raises(ValueError) as err:
+        map_rows(lw, n_vehicles)
+    assert str(err.value).startswith("spurs: ") and str(expected) in str(err.value)
+
+def test_a_null_info_block_is_an_empty_one(tmp_path):
+    spurs(tmp_path, name="nullinfo")  # writes nullinfo.json and its map, which gets "info": null next
+    path = tmp_path / "nullinfo_map.json"
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "info": None}), encoding="utf-8")
+    lw = load_world(tmp_path / "nullinfo.json")
+    assert lw.map_info == {}
+    rows = map_rows(lw).rows
+    assert [r["variant"] for r in rows] == GRID_NAMES + ["strict"] and {r["n_vehicles"] for r in rows} == {0}
+
+# F5: DIR should be a new folder, and the CLI says so; it does not delete what an earlier run left there.
+
+def test_cli_help_says_that_the_folder_should_be_new_and_old_files_stay(capsys):
+    with pytest.raises(SystemExit) as stop:
+        sidings_table.main(["--help"])
+    assert stop.value.code == 0
+    text = " ".join(capsys.readouterr().out.split())  # argparse wraps its lines
+    assert "DIR should be a new folder: files from earlier runs are not removed" in text  # the description
+    assert "it should be a new folder: files from earlier runs are not removed" in text  # the help of --out
+
+def test_cli_leaves_the_files_of_an_earlier_run_in_the_folder(tmp_path):
+    spurs(tmp_path, name="spurs")  # writes spurs.json and its map into tmp_path
+    config, out = str(tmp_path / "spurs.json"), tmp_path / "out"
+    assert sidings_table.main([config, "--out", str(out), "--plot"]) == 0
+    figures = sorted(out.rglob("*.png"))
+    assert [p.name for p in figures] == ["grid-bridge-s00.png", "strict.png"]
+    mine = out / "spurs" / "notes.txt"
+    mine.write_text("mine\n", encoding="utf-8")
+    assert sidings_table.main([config, "--out", str(out)]) == 0  # no --plot this time
+    assert sorted(out.rglob("*.png")) == figures and mine.read_text(encoding="utf-8") == "mine\n"

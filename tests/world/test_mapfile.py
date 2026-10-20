@@ -59,6 +59,8 @@ def _write_map(tmp_path, mutation):
     elif mutation == "port_on_untouched_node":  # D lies on no segment, and port P2 sits on D
         data["nodes"].append({"id": "D", "x": 5.0, "y": 5.0})
         data["ports"].append({"id": "P2", "nodeId": "D"})
+    elif mutation in ("info_list", "info_string", "info_number"):  # the info block must be an object (or null, or absent)
+        data["info"] = {"info_list": ["fleet"], "info_string": "fleet", "info_number": 3}[mutation]
     else:
         raise ValueError(f"unknown mutation {mutation!r}")
     path = tmp_path / "bad_map.json"
@@ -82,6 +84,9 @@ def _write_map(tmp_path, mutation):
     ("speed_nan", r"segment 2: speed must be finite and > 0, got nan$"),
     ("no_segments", r"bad_map\.json: the map has no segments"),
     ("port_on_untouched_node", r"port P2: node 'D' is touched by no segment"),
+    ("info_list", r"bad_map\.json: info must be an object, got \['fleet'\]$"),
+    ("info_string", r"bad_map\.json: info must be an object, got 'fleet'$"),
+    ("info_number", r"bad_map\.json: info must be an object, got 3$"),
 ])
 def test_rejects_bad_maps(tmp_path, mutation, message):
     # 3 노드 A(0,0) · B(1,0) · C(1,1), A↔B · B↔C 양방향, 포트 C 인 맵을 쓰고 mutation 하나를 넣는다:
@@ -91,3 +96,14 @@ def test_rejects_bad_maps(tmp_path, mutation, message):
     path = _write_map(tmp_path, mutation)
     with pytest.raises(MapFormatError, match=message):
         load_xmsmap(path)
+
+def test_info_block_is_an_object_and_null_or_absent_reads_as_an_empty_one(tmp_path):
+    data = tiny_map_data()
+    path = tmp_path / "info_map.json"
+    for info, expected in [({"fleet": {"AMR": 2}}, {"fleet": {"AMR": 2}}), ({}, {}), (None, {})]:
+        data["info"] = info
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert load_xmsmap(path).info == expected  # "info": null is no object, but DAIM reads it as {} too (safe_tail_map.py:221)
+    del data["info"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert load_xmsmap(path).info == {}

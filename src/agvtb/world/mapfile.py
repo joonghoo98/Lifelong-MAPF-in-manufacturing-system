@@ -56,7 +56,8 @@ def load_xmsmap(path: str | Path) -> MapFile:
     Raises MapFormatError naming the node, segment or port at fault: a duplicate node id, a comma in
     a node id, a coordinate that is not finite, a segment with an unknown node, zero length, arc
     parts, a repeated (start, end) or a speed that is not finite and > 0, a map with no segments,
-    a port on an unknown node or on a node no segment touches.
+    a port on an unknown node or on a node no segment touches. An "info" block that is neither an
+    object nor null is refused, naming the file; a missing or null one reads as {}.
     """
     path = Path(path)
     raw = path.read_bytes()
@@ -72,7 +73,7 @@ def load_xmsmap(path: str | Path) -> MapFile:
         segments=segments,
         ports=_read_ports(data["ports"], nodes, segments),
         vehicle=_read_vehicle(data["vehicleModels"][0]),
-        info=data.get("info", {}),
+        info=_read_info(data.get("info"), path.name),
     )
 
 
@@ -146,6 +147,15 @@ def _read_ports(
             )
         ports.append(RawPort(item["id"], item["nodeId"]))
     return tuple(ports)
+
+
+def _read_info(info, where: str) -> dict:
+    """The "info" block of a map file: {} if it is missing or null, else it must be an object."""
+    if info is None:
+        return {}
+    if not isinstance(info, dict):
+        raise MapFormatError(f"{where}: info must be an object, got {info!r}")
+    return info
 
 
 def _read_vehicle(model: dict) -> RawVehicle:

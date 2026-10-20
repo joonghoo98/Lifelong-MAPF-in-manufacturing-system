@@ -1,9 +1,10 @@
+import itertools
 import json
 import re
 
 import pytest
 
-from agvtb.sidings.grid_rule import grid_candidates
+from agvtb.sidings.grid_rule import GRID_MODES, CellGrid, grid_candidates, grid_sidings
 from agvtb.sidings.lattice import GRID_SHIFTS, LatticeError, grid_sidings_of_world, lattice_grid
 from agvtb.world.config import load_map_config
 from agvtb.world.loader import load_world
@@ -64,7 +65,10 @@ def test_sidings_are_lattice_nodes_and_never_ports_or_access_nodes():
     assert not got & (set(SONGDO_ACCESS.values()) | set(world.port_nodes))
 
 def test_kairos_is_not_a_lattice():
-    with pytest.raises(LatticeError, match="KAIROS_AMR"):
+    # 59 of its 61 nodes are off the 1.501 m lattice of na.44, 46 of them no port. The message says so; it does not blame
+    # the first port it meets (na.1, linked to na.2, which is off the lattice too). na.2 is the first of the 46 in the map file
+    expected = r"^KAIROS_AMR: 59 of 61 nodes are off the 1\.501 m lattice of na\.44 \(46 are no port\), first na\.2: "
+    with pytest.raises(LatticeError, match=expected):
         lattice_grid(world_of("KAIROS_AMR"))
 
 # a 1 m line L0-L1-L2-L3: its six 1 m segments outnumber the extra links in every case, so the pitch stays 1 m
@@ -82,6 +86,16 @@ def test_rejects_bad_lattices(tmp_path, extra_nodes, extra_links, ports, names):
     with pytest.raises(LatticeError) as err:
         lattice_grid(world)
     assert all(re.search(rf"\b{name}\b", str(err.value)) for name in names)  # whole ids: L0 must not match inside L0B
+
+def test_many_nodes_off_the_lattice_are_counted_and_checked_before_the_ports(tmp_path):
+    # Only a port may be off the lattice. P1, the first node off it in the map file, is a port with two links, a fault too;
+    # but X3, X1 and X2 are no ports. The message counts the nodes off the lattice and those that are no port, and names X3,
+    # the first of the three in the file (X1 is the first by id), not P1: the ports are looked at after the nodes that are no port
+    nodes = {**LINE, "P1": (2.5, 0.7), "X3": (0.5, 0.4), "X1": (1.5, 0.4), "X2": (3.5, 0.4)}
+    world = world_of_config(link_config(tmp_path, nodes, LINE_LINKS + [("L2", "P1"), ("L3", "P1")], ["L0", "P1"]))
+    with pytest.raises(LatticeError) as err:
+        lattice_grid(world)
+    assert str(err.value).startswith("links: 4 of 8 nodes are off the 1 m lattice of L0 (3 are no port), first X3: ")
 
 def test_rejects_bad_shift():
     with pytest.raises(ValueError, match=r"\(2, 0\)"):
@@ -137,3 +151,24 @@ def test_bridge_is_the_default_mode_and_the_shift_is_kept_as_plain_ints():
     assert grid_sidings_of_world(world) == grid_sidings_of_world(world, "bridge") != grid_sidings_of_world(world, "legacy")
     assert lattice_grid(world, (False, True)).shift == (0, 1)  # equal to a member of GRID_SHIFTS, stored as that member
     assert all(type(n) is int for cell in lattice_grid(world, (False, True)).cell_of.values() for n in cell)
+
+# Final review fix F3: what the lattice_grid docstring says of DAIM's numbering when its grid has blocked rows below or columns left.
+
+@pytest.mark.parametrize("name", ["mini_deadend", "random_32_32_20"])
+@pytest.mark.parametrize("mode", GRID_MODES)
+def test_shift_by_the_parity_of_the_blocked_rows_and_columns_gives_daims_numbering(name, mode):
+    # A DAIM grid may have `below` blocked rows under and `left` blocked columns left of the lattice nodes (and blocked margins
+    # above and right). The grid rule reads a cell number only through its row and column parity, so the member of GRID_SHIFTS
+    # equal to (below, left) mod 2 picks the same sidings as that numbering, which the grid rule is run on here directly
+    world = world_of(name)
+    lattice = lattice_grid(world)
+    free = lattice.grid.free_cells()
+    for below, left in itertools.product(range(4), repeat=2):
+        rows, cols = lattice.grid.rows + below + 1, lattice.grid.cols + left + 2
+        daim = CellGrid(
+            rows, cols,
+            frozenset((r, c) for r in range(rows) for c in range(cols) if (r - below, c - left) not in free),
+            tuple((r + below, c + left) for r, c in lattice.grid.ports),
+        )
+        got = sorted(lattice.node_at[(r - below, c - left)] for r, c in grid_sidings(daim, mode))
+        assert got == sorted(grid_sidings_of_world(world, mode, (below % 2, left % 2))), (below, left)

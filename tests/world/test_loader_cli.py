@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import pytest
 from matplotlib.figure import Figure
 
-from agvtb.sidings.condition_m import EXCLUSION_REASONS
 from agvtb.tools import describe_map
 from agvtb.world.collision_grid import GridRuleError, grid_conflicts
 from agvtb.world.collision_poly import poly_conflicts
@@ -152,6 +151,7 @@ def test_plot_legend_counts_the_sidings_and_the_crosses_of_each_reason(tmp_path,
     assert legend_texts(saved_figures[-1]) is None
 
 def test_plot_crosses_have_a_size_for_each_reason_and_keep_it_from_figure_to_figure(tmp_path, saved_figures):
+    from agvtb.sidings.condition_m import EXCLUSION_REASONS  # here, not at the top: an M1 module must not need sidings to collect
     world = load_world(CONFIGS / "mini_deadend.json").world
 
     def sizes(excluded):  # reason -> marker area of its crosses, read off the figure
