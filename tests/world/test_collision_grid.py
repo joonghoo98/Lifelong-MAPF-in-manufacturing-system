@@ -1,11 +1,16 @@
 import dataclasses
+import json
 
 import pytest
 
 from agvtb.world.collision_grid import GridRuleError, check_grid_rule, grid_conflicts, grid_pitch
-from agvtb.world.model import Footprint
+from agvtb.world.collision_poly import poly_conflicts
+from agvtb.world.config import load_map_config
+from agvtb.world.loader import load_world
+from agvtb.world.mapfile import load_xmsmap
+from agvtb.world.model import Footprint, build_world
 from agvtb.world.states import build_state_graph, geom_key
-from helpers import tiny_world, world_of
+from helpers import tiny_config, tiny_map_data, tiny_world, world_of
 
 def test_tiny_conflicts(tmp_path):
     w = tiny_world(tmp_path); c = grid_conflicts(w, build_state_graph(w))
@@ -92,3 +97,93 @@ def test_real_map_conflict_structure(name):
     assert [(a, b) for a, bs in c.items() for b in bs if a not in c[b]] == []   # symmetric
     # an L takes the space of the S with the same pose: apart from the pair itself, the same conflicts
     assert [s for s in g if s.startswith("L,") and c[s] | {s} != c[geom_key(s)] | {geom_key(s)}] == []
+
+# --- the lattice premise: the cell rule is right only on a lattice, so check_grid_rule checks one ---
+
+def _edited_tiny_config(tmp_path, edit):
+    """Config of the tiny map (grid mode, 0.5 m vehicle, 1 m segments) after edit(data) changed its xMSmap dict."""
+    tmp_path.mkdir(exist_ok=True)
+    config = tiny_config(tmp_path)
+    data = tiny_map_data()
+    edit(data)
+    (tmp_path / "tiny_map.json").write_text(json.dumps(data), encoding="utf-8")
+    return config
+
+def _edited_tiny_world(tmp_path, edit):
+    cfg = load_map_config(_edited_tiny_config(tmp_path, edit))
+    return build_world(cfg, load_xmsmap(cfg.map_path))
+
+def _add_segments(data, *pairs):
+    # speed 0.5, ids go on from the last one
+    for start, end in pairs:
+        data["segments"].append({"id": len(data["segments"]) + 1, "startNodeId": start, "endNodeId": end, "speed": 0.5})
+
+def _node_0_6_m_from_another(data):
+    # D lies 0.6 m from C with no segment between them; D-E is a plain 1 m link of its own
+    data["nodes"] += [{"id": "D", "x": 1.6, "y": 1.0}, {"id": "E", "x": 2.6, "y": 1.0}]
+    _add_segments(data, ("D", "E"), ("E", "D"))
+
+def _unit_square_with_both_diagonals(data):
+    # the square A B C D; its diagonals A-C and B-D cross in the middle and share no node
+    data["nodes"].append({"id": "D", "x": 0.0, "y": 1.0})
+    _add_segments(data, ("C", "D"), ("D", "C"), ("D", "A"), ("A", "D"), ("A", "C"), ("C", "A"), ("B", "D"), ("D", "B"))
+
+def _two_node_ids_at_one_point(data):
+    # A2 sits on A and links to B as A does
+    data["nodes"].append({"id": "A2", "x": 0.0, "y": 0.0})
+    _add_segments(data, ("A2", "B"), ("B", "A2"))
+
+PROBES = [  # the final review's three probes, each with a 0.5 m vehicle and 1.0 m segments
+    pytest.param(_node_0_6_m_from_another, r"node D is off the 1\.000 m lattice of node A", id="node 0.6 m from another"),
+    pytest.param(_unit_square_with_both_diagonals, r"segment A -> C is not axis-aligned", id="unit square with both diagonals"),
+    pytest.param(_two_node_ids_at_one_point, r"nodes A and A2 are at the same lattice point", id="two node ids at one point"),
+]
+
+@pytest.mark.parametrize("edit, message", PROBES)
+def test_check_grid_rule_needs_a_lattice(tmp_path, edit, message):
+    # the diagonal rule alone lets each probe through (0.707 m <= 1.0 m); the map is no lattice, so GridRuleError
+    # names the node or segment and points to polygon mode
+    world = _edited_tiny_world(tmp_path, edit)
+    assert grid_pitch(world) == 1.0
+    with pytest.raises(GridRuleError, match=message) as err:
+        check_grid_rule(world)
+    assert "collision: polygon" in str(err.value)
+
+@pytest.mark.parametrize("edit", [probe.values[0] for probe in PROBES], ids=[probe.id for probe in PROBES])
+def test_the_probes_are_real_misses_of_the_cell_rule(tmp_path, edit):
+    # why the lattice is checked: on each probe polygon mode finds colliding pairs that the cell rule does not
+    world = dataclasses.replace(_edited_tiny_world(tmp_path, edit), collision="polygon")
+    graph = build_state_graph(world)
+    poly, grid = poly_conflicts(world, graph), grid_conflicts(world, graph)
+    assert all(grid[sid] <= poly[sid] for sid in graph)
+    assert sum(len(poly[sid] - grid[sid]) for sid in graph) > 0
+
+def test_load_world_refuses_a_map_that_is_no_lattice(tmp_path):
+    with pytest.raises(GridRuleError, match="node D is off the"):
+        load_world(_edited_tiny_config(tmp_path, _node_0_6_m_from_another))
+
+def test_check_grid_rule_rejects_a_segment_longer_than_the_pitch(tmp_path):
+    # B -> E is 2 m long between two nodes of the 1 m lattice: it runs through (2, 0), which has no node of its own
+    def edit(data):
+        data["nodes"].append({"id": "E", "x": 3.0, "y": 0.0})
+        _add_segments(data, ("B", "E"), ("E", "B"))
+    with pytest.raises(GridRuleError, match=r"segment B -> E is 2\.000 m long, not the pitch 1\.000 m") as err:
+        check_grid_rule(_edited_tiny_world(tmp_path, edit))
+    assert "collision: polygon" in str(err.value)
+
+def test_axis_alignment_comes_from_the_coordinates_not_the_heading(tmp_path):
+    # a heading offset of -45 degrees gives the diagonal A -> C the axis heading 0; it is still a diagonal
+    def edit(data):
+        data["segments"].append({"id": 5, "startNodeId": "A", "endNodeId": "C", "speed": 0.5, "heading": [{"degree": -45}]})
+    world = _edited_tiny_world(tmp_path, edit)
+    assert world.segments[("A", "C")].heading_deg == 0
+    with pytest.raises(GridRuleError, match=r"segment A -> C is not axis-aligned"):
+        check_grid_rule(world)
+
+def test_check_grid_rule_lattice_tolerance(tmp_path):
+    # a coordinate off by 1e-7 m is float noise and fits; one off by 1e-5 m is a real shift
+    def move_c(shift):
+        return lambda data: data["nodes"][2].update(x=data["nodes"][2]["x"] + shift)
+    assert check_grid_rule(_edited_tiny_world(tmp_path / "noise", move_c(1e-7))) is None
+    with pytest.raises(GridRuleError, match=r"segment B -> C is not axis-aligned"):
+        check_grid_rule(_edited_tiny_world(tmp_path / "shifted", move_c(1e-5)))

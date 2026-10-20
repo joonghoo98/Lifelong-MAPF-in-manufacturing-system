@@ -23,8 +23,8 @@ class LoadedWorld:
 def load_world(config_path: str | Path) -> LoadedWorld:
     """The World, StateGraph and Conflicts of a map config, built as its collision mode says.
 
-    grid: rule-built states, the cell rule checked (GridRuleError if the vehicle is too big for it),
-    then the cell conflicts. polygon: rule-built states and polygon conflicts, with no cell-rule
+    grid: rule-built states, the cell rule checked (GridRuleError if the vehicle is too big for it or
+    the map is no lattice), then the cell conflicts. polygon: rule-built states and polygon conflicts, with no cell-rule
     check, which songdo_grid_bi fails by design. profile: states and conflicts as the shipped
     profile gives them (ProfileMismatchError if it was not made for this map file, breaks the
     contract of a graph and its conflicts, or has durations that disagree with the world).
