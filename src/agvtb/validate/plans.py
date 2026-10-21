@@ -106,11 +106,11 @@ def unprotected(mine: Sequence[tuple[int, str, Hashable]], others: Mapping[int, 
     descendant of mine, and which conflicts with it. The caller passes the event graph's relation."""
     out = []
     for i, sa, na in mine:
-        ordered = related(na)
-        for b in sorted(others):
-            for j, sb, nb in others[b]:
-                if nb not in ordered and conflicting(conflicts, sa, sb):
-                    out.append({"i": i, "b": b, "j": j, "sa": sa, "sb": sb})
+        clash = [(b, j, sb, nb) for b in sorted(others) for j, sb, nb in others[b] if conflicting(conflicts, sa, sb)]
+        if not clash:
+            continue
+        ordered = related(na)  # only looked up when some state collides with this one
+        out += [{"i": i, "b": b, "j": j, "sa": sa, "sb": sb} for b, j, sb, nb in clash if nb not in ordered]
     return out
 
 

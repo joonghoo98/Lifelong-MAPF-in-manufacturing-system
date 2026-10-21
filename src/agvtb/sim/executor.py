@@ -87,6 +87,26 @@ class Executor:
         v.path_idx -= n
         v.claim_idx = max(0, v.claim_idx - n)
 
+    def wake_ready(self, t: float) -> None:
+        """After a recompute: wake the blocked vehicles that can now go on (DAIM env:1950-1977)."""
+        for vid in sorted(self.vehicles):
+            v = self.vehicles[vid]
+            path = self.tapg.paths[vid]
+            if v.state != "WAITING" or v.dwelling or v.path_idx >= len(path):
+                continue
+            i, go = v.path_idx, True
+            while i < len(path):
+                if not self._claimable(v, i):
+                    go = False
+                    break
+                if not path[i][0].startswith("S,"):
+                    break
+                i += 1
+            if go:
+                v.state = "IDLE"
+                self.on_event(t, "wake", vid, ())
+                self.kernel.schedule(t + WAKE_DELAY, AGV, self._try_advance, vid)
+
     def inprog_end(self) -> dict[Key, float]:
         """The real end of every move, rotation and dwell in progress, keyed by its node."""
         out: dict[Key, float] = {}
@@ -148,7 +168,7 @@ class Executor:
             self.on_event(t, "block", v.vid, (self.tapg.paths[v.vid][v.path_idx][0],))
         v.state, v.v = "WAITING", 0.0
 
-    def _wake(self, vids: list[int], t: float) -> None:
+    def wake(self, vids: list[int], t: float) -> None:
         for w in vids:
             other = self.vehicles.get(w)
             if other is not None and other.state == "WAITING":
@@ -157,7 +177,7 @@ class Executor:
                 self.kernel.schedule(t + WAKE_DELAY, AGV, self._try_advance, w)
 
     def _remove(self, key: Key, t: float) -> None:
-        self._wake(self.tapg.remove(key), t)
+        self.wake(self.tapg.remove(key), t)
 
     # --- events ------------------------------------------------------------------------------------------------
     def _try_advance(self, t: float, vid: int) -> None:
