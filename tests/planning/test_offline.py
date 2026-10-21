@@ -105,6 +105,7 @@ def test_the_gate_refuses_before_any_planning(mini, tmp_path):  # user decisions
 
 @pytest.mark.parametrize("n, k, interval, match", [
     (0, 1, 0.0, "n_vehicles"), (1, -1, 0.0, "n_tasks"), (1, 1, -1.0, "interval"), (1, 1, float("inf"), "interval"),
+    (1, 3, 1e308, "interval"),  # final review: the last dispatch time 2 * 1e308 overflows to inf
 ])
 def test_rejects_bad_counts(n, k, interval, match):  # Review Focus 3
     with pytest.raises(ValueError, match=match):

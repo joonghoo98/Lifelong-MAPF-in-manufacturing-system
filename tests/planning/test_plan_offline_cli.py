@@ -44,6 +44,9 @@ def test_cli_sidings_override(tmp_path):  # offline_more.out.txt 3.
     [str(CONFIGS / "no_such_map.json"), "--vehicles", "2", "--tasks", "1"],
     # plan_review_2.md finding 1: an --out folder that does not exist is seen before any planning
     [str(CONFIGS / "mini_deadend.json"), "--vehicles", "2", "--tasks", "1", "--out", "no_such_dir/x.json"],
+    # final review: --out naming a folder, and dispatch times that overflow, also end before planning
+    [str(CONFIGS / "mini_deadend.json"), "--vehicles", "2", "--tasks", "1", "--out", str(CONFIGS)],
+    [str(CONFIGS / "mini_deadend.json"), "--vehicles", "1", "--tasks", "3", "--interval", "1e308"],
 ])
 def test_cli_usage_errors(argv):
     with pytest.raises(SystemExit) as exc:

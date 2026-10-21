@@ -43,8 +43,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--budget must be >= 1, got {args.budget}")
     if not (math.isfinite(args.interval) and args.interval >= 0):
         parser.error(f"--interval must be finite and >= 0, got {args.interval}")
+    if not math.isfinite(max(args.tasks - 1, 0) * args.interval):
+        parser.error(f"--interval {args.interval} makes the last dispatch time of {args.tasks} tasks overflow")
     if args.out is not None and not Path(args.out).parent.is_dir():
         parser.error(f"--out: no folder {Path(args.out).parent}")
+    if args.out is not None and Path(args.out).is_dir():
+        parser.error(f"--out: {args.out} is a folder, not a file")
 
     try:
         cfg = load_map_config(args.config)

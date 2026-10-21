@@ -93,6 +93,8 @@ def plan_offline(
         raise ValueError(f"n_tasks must be >= 0, got {n_tasks}")
     if not (math.isfinite(interval_s) and interval_s >= 0):
         raise ValueError(f"interval_s must be finite and >= 0, got {interval_s}")
+    if not math.isfinite(max(n_tasks - 1, 0) * interval_s):
+        raise ValueError(f"interval_s {interval_s} makes the last dispatch time of {n_tasks} tasks overflow")
     interval_s = float(interval_s)  # an int interval would make int dispatch times and change the digests
     ports = list(ports)
     gate = check_gate(graph, conflicts, ports, candidates, n_vehicles)
