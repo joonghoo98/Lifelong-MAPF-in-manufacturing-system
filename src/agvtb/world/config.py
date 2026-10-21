@@ -1,4 +1,4 @@
-"""Read a per-map config JSON: map file, scale, motion values, collision mode."""
+"""Read a per-map config JSON: map file, scale, motion values, collision mode, and the optional siding variant."""
 import json
 import math
 from dataclasses import dataclass
@@ -26,6 +26,7 @@ class MapConfig:
     dwell_s: float
     collision: str  # one of COLLISION_MODES
     profile_path: Path | None  # set only when collision == "profile"
+    sidings: str | None = None  # the optional "sidings" key: a siding choice text, read by agvtb.sidings.choice
 
 
 def load_map_config(path: str | Path) -> MapConfig:
@@ -56,6 +57,7 @@ def load_map_config(path: str | Path) -> MapConfig:
         dwell_s=_number(data, "dwell_s", where, zero_ok=True),
         collision=collision,
         profile_path=profile_path,
+        sidings=_text(data, "sidings", where) if "sidings" in data else None,
     )
 
 

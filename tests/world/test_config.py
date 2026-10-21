@@ -94,3 +94,19 @@ def test_four_configs_build_worlds(name, units, collision, counts):
         assert cfg.profile_path is None
     w = world_of(name)
     assert (len(w.nodes), len(w.segments), len(w.port_nodes)) == counts
+
+
+@pytest.mark.parametrize("config, choice", [
+    ("mini_deadend.json", "grid-bridge-s00"), ("random_32_32_20.json", "grid-bridge-s00"),
+    ("songdo_grid_bi.json", "grid-bridge-s00"),
+    ("KAIROS_AMR.json", "list:na.17,na.196,na.197,na.198,na.202,na.203,na.204,na.40,na.41,na.42,na.59,na.60"),
+    ("daim/grid_songdo_manual.json", "grid-bridge-s00"), ("daim/grid_songdo_travelbr.json", None),
+])
+def test_research_configs_carry_the_users_variant(config, choice):  # user decision G3, 2026-10-21
+    assert load_map_config(CONFIGS / config).sidings == choice
+
+
+def test_sidings_is_optional_and_must_be_a_string(tmp_path):
+    assert load_map_config(tiny_config(tmp_path)).sidings is None
+    with pytest.raises(ConfigError, match="sidings"):
+        load_map_config(_edit(tiny_config(tmp_path), sidings=3))

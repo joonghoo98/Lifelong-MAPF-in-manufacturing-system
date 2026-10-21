@@ -7,5 +7,6 @@
   "rotation_s_per_90deg": 2.5,
   "dwell_s": 10.0,
   "collision": "profile",
-  "profile": "../../../grid_map/KAIROS_AMR/KAIROS_AMR.map_collision.json"
+  "profile": "../../../grid_map/KAIROS_AMR/KAIROS_AMR.map_collision.json",
+  "sidings": "list:na.17,na.196,na.197,na.198,na.202,na.203,na.204,na.40,na.41,na.42,na.59,na.60"
 }
