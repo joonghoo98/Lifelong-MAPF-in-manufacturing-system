@@ -104,13 +104,35 @@ def unprotected(mine: Sequence[tuple[int, str, Hashable]], others: Mapping[int, 
     """Colliding state pairs the event graph leaves unordered (DAIM plan_validator.py:125-148): for each of my
     states (i, sid, node), each other vehicle's state (j, sid2, node2) whose node is neither an ancestor nor a
     descendant of mine, and which conflicts with it. The caller passes the event graph's relation."""
+    memo: dict[str, set[str]] = {}
+
+    def aff(sid: str) -> set[str]:
+        if sid not in memo:
+            memo[sid] = _affect(conflicts, sid)
+        return memo[sid]
+
+    def clash(a: str, b: str) -> bool:  # conflicting(), with the affect sets kept for the call
+        g1, g2 = _geom(a), _geom(b)
+        if g1 == g2 or g2 in aff(a) or g1 in aff(b):
+            return True
+        return g1.startswith("S,") and g2.startswith("S,") and g1.split(",")[1] == g2.split(",")[1]
+
+    by_node: dict[str, list[tuple[int, int, str, Hashable]]] = collections.defaultdict(list)
+    for b in sorted(others):
+        for j, sb, nb in others[b]:
+            for n in _nodes(sb):
+                by_node[n].append((b, j, sb, nb))
     out = []
     for i, sa, na in mine:
-        clash = [(b, j, sb, nb) for b in sorted(others) for j, sb, nb in others[b] if conflicting(conflicts, sa, sb)]
-        if not clash:
+        reach = set(_nodes(sa))
+        for x in aff(sa):
+            reach |= _nodes(x)
+        near = sorted({c for n in reach for c in by_node.get(n, ())}, key=lambda c: (c[0], c[1]))
+        hits = [c for c in near if clash(sa, c[2])]
+        if not hits:
             continue
         ordered = related(na)  # only looked up when some state collides with this one
-        out += [{"i": i, "b": b, "j": j, "sa": sa, "sb": sb} for b, j, sb, nb in clash if nb not in ordered]
+        out += [{"i": i, "b": b, "j": j, "sa": sa, "sb": sb} for b, j, sb, nb in hits if nb not in ordered]
     return out
 
 

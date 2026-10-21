@@ -111,8 +111,8 @@ class Executor:
         """The real end of every move, rotation and dwell in progress, keyed by its node."""
         out: dict[Key, float] = {}
         for v in self.vehicles.values():
-            if v.state in ("MOVING", "ROTATING") and v.node is not None:
-                out[v.node] = v.t0 + v.dur
+            if v.state in ("MOVING", "ROTATING"):  # keyed by its node now: recompute re-keys nodes (env:1947)
+                out[self.tapg.key(v.vid, v.path_idx)] = v.t0 + v.dur
             elif v.dwelling and v.load_end is not None and v.path_idx < len(self.tapg.paths[v.vid]):
                 out[self.tapg.key(v.vid, v.path_idx)] = v.load_end
         return out
@@ -322,22 +322,18 @@ class Executor:
 
 
 def wait_cycles(blocked: Mapping[int, set[int]]) -> list[tuple[int, ...]]:
-    """The cycles (size >= 2) of the wait-for relation, each from its smallest id, sorted."""
-    found: set[tuple[int, ...]] = set()
-    for start in sorted(blocked):
-        chain, pos = [start], {start: 0}
-        cur = start
-        while True:
-            nxt = sorted(blocked.get(cur, ()))
-            if not nxt:
-                break
-            cur = nxt[0]
-            if cur in pos:
-                cyc = chain[pos[cur]:]
-                if len(cyc) >= 2:
-                    i = cyc.index(min(cyc))
-                    found.add(tuple(cyc[i:] + cyc[:i]))
-                break
-            pos[cur] = len(chain)
-            chain.append(cur)
-    return sorted(found)
+    """The groups of vehicles (two or more) that wait on each other through some chain of blockers: the strongly
+    connected components of the wait-for relation, each as its sorted ids, the list sorted. A vehicle needs every
+    blocker to move on, so such a group can never all move."""
+    reach: dict[int, set[int]] = {}
+    for start in blocked:
+        seen, stack = set(), [start]
+        while stack:
+            for nxt in blocked.get(stack.pop(), ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        reach[start] = seen
+    groups = {tuple(sorted({v} | {u for u in reach[v] if u in reach and v in reach[u]}))
+              for v in blocked if v in reach[v]}
+    return sorted(g for g in groups if len(g) >= 2)

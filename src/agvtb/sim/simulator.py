@@ -71,8 +71,9 @@ class SimResult:
     @property
     def ok(self) -> bool:
         d = self.deadlock
+        defects = self.stats.get("inline_miss", 0) + self.stats.get("stray_arrivals", 0)  # only a bug makes these
         return (not d["global"] and d["partial_jobs"] == 0 and d["held_at_end"] == 0 and not d["wait_cycles"]
-                and not any(self.checks.values()))
+                and not any(self.checks.values()) and defects == 0)
 
 
 def live_constraints(tapg: Tapg, executor: Executor, now: float) -> dict[int, list[tuple[str, float, float]]]:
@@ -204,7 +205,7 @@ class _Run:
                 self.pending[vid] = [job.dst]
             else:
                 self.arrival[vid] = idx
-        self._replan(t)
+        self._replan(t, force=True)
 
     def _inline_arrival(self, vid: int, job: Job) -> int | None:
         """The index of the stop before the unload in the vehicle's committed task (research §A7)."""
@@ -264,8 +265,10 @@ class _Run:
                 jid, lo, hi = self.span[vid]
                 self.span[vid] = (jid, lo - n, hi - n)
 
-    def _replan(self, t: float) -> None:
-        if not self.pending:
+    def _replan(self, t: float, force: bool = False) -> None:
+        """Every dispatch prunes and re-times the TAPG, even with nothing to plan (DAIM puts the dispatched
+        vehicle in pending each time, vis:5357, 5393-5397)."""
+        if not self.pending and not force:
             return
         self._prune(t)
         self.tapg.recompute(t, self.ex.inprog_end())

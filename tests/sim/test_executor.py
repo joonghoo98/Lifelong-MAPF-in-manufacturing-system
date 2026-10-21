@@ -77,3 +77,21 @@ def test_wait_cycles():
     assert wait_cycles({1: {2}, 2: {1}}) == [(1, 2)]
     assert wait_cycles({3: {1}, 1: {2}, 2: {3}, 4: {1}}) == [(1, 2, 3)]
     assert wait_cycles({1: {2}, 2: set()}) == []
+
+
+def test_two_recomputes_during_one_move_keep_its_real_end():  # final review I1, Review Focus 4
+    graph, conflicts = fake_room_with_spurs()[:2]
+    k, g = Kernel(), Tapg(graph, conflicts)
+    g.add_vehicle(1, "S,c00,0", 0.0)
+    ex = Executor(graph, g, k, lambda sid: (1.0, 0.5), 0.5, 0.5, lambda *a: None)
+    g.append(1, [("S,c00,0", 0.0), ("M,c00,c10", 0.0), ("S,c10,0", 2.0)])
+    ex.add(1)
+    for t in (0.5, 2.0):
+        k.run_until(t, dt=0.5)
+        g.recompute(t, ex.inprog_end())
+    assert g.paths[1][-1] == ("S,c10,0", 3.0)
+
+
+def test_wait_cycles_follow_every_blocker():  # final review I2
+    assert wait_cycles({1: {2, 3}, 3: {1}}) == [(1, 3)]
+    assert wait_cycles({1: {2}, 2: {1, 3}, 3: {4}, 4: {3}}) == [(1, 2), (3, 4)]

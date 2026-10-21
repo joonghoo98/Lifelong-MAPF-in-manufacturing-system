@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import subprocess
 import sys
@@ -7,6 +8,7 @@ import pytest
 from agvtb.planning.safe_tail import SafeTailPlanner
 from agvtb.sidings.choice import candidates_of, parse_siding_choice
 from agvtb.sim.simulator import SimConfig, simulate
+from agvtb.sim.tapg import Tapg
 from agvtb.world.loader import load_world
 from helpers import CONFIGS, REPO
 
@@ -94,3 +96,21 @@ def test_kpi_matches_the_job_records(base):  # research §F2 definitions
     assert base.kpi["completed"] == len(done)
     assert base.kpi["throughput_per_h"] == pytest.approx(len(done) / window * 3600)
     assert base.kpi["cycle_s"] == pytest.approx(sum(j.t_completed - j.t_created for j in done) / len(done))
+
+
+def test_defect_counters_fail_the_run(base):  # final review M3 (re-graded Important)
+    for name in ("inline_miss", "stray_arrivals"):
+        assert not dataclasses.replace(base, stats=base.stats | {name: 1}).ok
+
+
+def test_every_dispatch_prunes_and_recomputes(mini, monkeypatch):  # final review M2 (re-graded Important), DAIM vis:5357-5397
+    real, times = Tapg.recompute, []
+
+    def counting(self, now, inprog):
+        times.append(now)
+        return real(self, now, inprog)
+
+    monkeypatch.setattr(Tapg, "recompute", counting)
+    r = short(mini)
+    dispatches = sum(j.t_assigned is not None for j in r.jobs) + sum(j.t_pickup_arr is not None for j in r.jobs)
+    assert len(times) == dispatches
