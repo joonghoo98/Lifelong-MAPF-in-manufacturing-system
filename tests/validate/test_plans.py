@@ -4,8 +4,8 @@ from pathlib import Path
 import agvtb.validate.plans as plans_module
 from agvtb.planning.reservations import ReservationTable
 from agvtb.planning.safe_tail import SafeTailPlanner
-from agvtb.validate.plans import (conflicting, early_fallback, occupancy, pairwise_overlaps, tail_violations,
-                                  task_order_violation)
+from agvtb.validate.plans import (conflicting, early_fallback, live_entries, occupancy, pairwise_overlaps,
+                                  path_vs_entries, tail_violations, task_order_violation, unprotected)
 from helpers import fake_room_with_spurs
 
 INF = float("inf")
@@ -87,3 +87,29 @@ def test_the_validator_does_not_import_the_planner():  # design §11
     names = [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
     names += [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
     assert not any(name.startswith("agvtb.planning") for name in names)
+
+
+RAW = [("S,c00,0", 0.0), ("M,c00,c10", 0.0), ("S,c10,0", 2.0), ("M,c10,c20", 2.0), ("S,c20,0", 4.0)]
+
+
+def test_live_entries_hold_the_current_and_claimed_states_from_now():  # DAIM plan_validator.py:68-83
+    assert live_entries(RAW, 1, 3, 1.5) == [("M,c00,c10", 1.5, 2.0), ("S,c10,0", 1.5, 2.0),
+                                            ("M,c10,c20", 2.0, 4.0), ("S,c20,0", 4.0, INF)]
+    assert live_entries(RAW, 9, 9, 6.0) == [("S,c20,0", 6.0, INF)]
+    assert live_entries(RAW, 0, 0, 3.0)[0] == ("S,c00,0", 3.0, 3.0) and live_entries([], 0, 0, 1.0) == []
+
+
+def test_path_vs_entries_is_one_side_of_pairwise_overlaps():  # validator_expected.out.txt (M3)
+    _graph, conflicts, _ports = fake_room_with_spurs()
+    got = path_vs_entries(A, {2: occupancy(B)}, conflicts)
+    assert got == [{k: v for k, v in o.items() if k != "a"} for o in pairwise_overlaps({1: A, 2: B}, conflicts)]
+    assert len(got) == 3
+
+
+def test_unprotected_finds_conflicting_states_with_no_order():  # DAIM plan_validator.py:125-148
+    _graph, conflicts, _ports = fake_room_with_spurs()
+    mine = [(0, "S,c10,0", "a")]
+    others = {2: [(0, "M,c20,c10", "b"), (1, "S,c40,0", "c")]}
+    assert unprotected(mine, others, lambda n: set(), conflicts) == [
+        {"i": 0, "b": 2, "j": 0, "sa": "S,c10,0", "sb": "M,c20,c10"}]
+    assert unprotected(mine, others, lambda n: {"b"}, conflicts) == []

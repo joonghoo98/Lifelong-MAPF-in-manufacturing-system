@@ -5,7 +5,8 @@ read from the state id here, not taken from the planner or the world model. A pa
 element i lasts until the next element's time, the last one forever.
 """
 import collections
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 
 from agvtb.world.states import Conflicts
 
@@ -69,6 +70,47 @@ def _entries_vs(conflicts: Conflicts, mine, others: Mapping[int, Sequence[tuple[
                     continue
                 seen.add(key)
                 out.append({"b": bid, "sa": sid, "sb": sid2, "t": max(t0, u0)})
+    return out
+
+
+def live_entries(raw_path: Sequence[tuple[str, float]], path_idx: int, claim_idx: int,
+                 now: float) -> list[tuple[str, float, float]]:
+    """What a running vehicle still holds (DAIM plan_validator.py:68-83): its current state and its claimed
+    states from now until their next plan time (but not before now), the rest at their plan times, the last
+    forever."""
+    n = len(raw_path)
+    if not n:
+        return []
+    idx = min(int(path_idx), n - 1)
+    out = []
+    for i in range(idx, n):
+        sid, t = raw_path[i]
+        nxt = raw_path[i + 1][1] if i + 1 < n else INF
+        if i == idx or i < claim_idx:
+            out.append((sid, float(now), max(nxt, float(now))))
+        else:
+            out.append((sid, float(t), nxt))
+    return out
+
+
+def path_vs_entries(path: Sequence[tuple[str, float]], others: Mapping[int, Sequence[tuple[str, float, float]]],
+                    conflicts: Conflicts) -> list[dict]:
+    """A new path against what the other vehicles hold: [{b, sa, sb, t}] (DAIM plan_validator.py:109-112)."""
+    return _entries_vs(conflicts, occupancy(path), others)
+
+
+def unprotected(mine: Sequence[tuple[int, str, Hashable]], others: Mapping[int, Sequence[tuple[int, str, Hashable]]],
+                related: Callable[[Hashable], AbstractSet], conflicts: Conflicts) -> list[dict]:
+    """Colliding state pairs the event graph leaves unordered (DAIM plan_validator.py:125-148): for each of my
+    states (i, sid, node), each other vehicle's state (j, sid2, node2) whose node is neither an ancestor nor a
+    descendant of mine, and which conflicts with it. The caller passes the event graph's relation."""
+    out = []
+    for i, sa, na in mine:
+        ordered = related(na)
+        for b in sorted(others):
+            for j, sb, nb in others[b]:
+                if nb not in ordered and conflicting(conflicts, sa, sb):
+                    out.append({"i": i, "b": b, "j": j, "sa": sa, "sb": sb})
     return out
 
 
