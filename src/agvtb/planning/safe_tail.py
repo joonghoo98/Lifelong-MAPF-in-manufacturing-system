@@ -219,6 +219,107 @@ class SafeTailPlanner:
         self.stats["search_exhausted"] += 1
         return None
 
+    # --- the task: search, else the fallback plan (DAIM :155-259) ---------------------------------------------------
+    def plan_task(
+        self,
+        start_sid: str,
+        start_time: float,
+        legs: Sequence[str],
+        table: Table,
+        candidates: Iterable[str],
+        home: str | None,
+    ) -> TaskPlan | None:
+        """One task: the staged SIPP search, else the fallback plan. None if neither finds one (a map condition
+        is broken, or a bug). Wall-clock time is not measured (results stay deterministic)."""
+        legs = [str(p) for p in legs]
+        res = self.search(start_sid, float(start_time), legs, table, {str(c) for c in candidates})
+        if res is not None:
+            self.stats["search_ok"] += 1
+            self.expansions_ok.append(res.expansions)
+            return res
+        fb = self.fallback(start_sid, float(start_time), legs, table, home)
+        if fb is None:
+            self.stats["fallback_fail"] += 1
+            return None
+        self.stats["fallback_used"] += 1
+        return fb
+
+    def path_conflicts(self, path: Sequence[tuple[str, float]], table: Table) -> list[tuple[int, str]]:
+        """Where path overlaps the table: [(path index, key)]; empty means none. The last element, if an S, is
+        held forever, and its affects are looked at too."""
+        bad = []
+        for i, (sid, t) in enumerate(path):
+            end = path[i + 1][1] if i + 1 < len(path) else INF
+            keys = [geom_key(sid)]
+            if i + 1 == len(path) and self.graph[sid].kind == "S":
+                keys += [geom_key(x) for x in affects(self.conflicts, sid)]
+            for key in keys:
+                if any(lo < end - EPS and hi > t + EPS for lo, hi in table.get(key, ())):
+                    bad.append((i, key))
+                    break
+        return bad
+
+    def fallback(
+        self, start_sid: str, t_start: float, legs: Sequence[str], table: Table, home: str | None
+    ) -> TaskPlan | None:
+        """Wait on the start stop until T* (the last finite reservation end), then the static shortest path
+        through the stages and home on a graph where only the keys reserved forever are blocked. Checked against
+        the table at the end: an overlap makes it invalid."""
+        start_state = self.graph.get(start_sid)
+        if start_state is None or start_state.kind != "S" or home is None:
+            return None
+        legs = [str(p) for p in legs]
+        t_star = max((hi for ivs in table.values() for _, hi in ivs if hi != INF), default=0.0)
+        t0 = max(float(t_start), t_star)
+        dead = {key for key, ivs in table.items() if any(hi == INF for _, hi in ivs)}
+        m = len(legs)
+        dist = {(0, start_sid): 0.0}
+        parent: dict[tuple, tuple | None] = {(0, start_sid): None}
+        heap = [(0.0, 0, start_sid)]
+        goal = None
+        while heap:
+            d, k, sid = heapq.heappop(heap)
+            if d > dist.get((k, sid), INF) + EPS:
+                continue
+            node = self.graph[sid].nodes[0]
+            if k == m and node == str(home):
+                goal = (k, sid)
+                break
+            for nxt in self.graph[sid].next:
+                if nxt.startswith("L,"):
+                    if k < m and node == legs[k]:
+                        self._relax(dist, parent, heap, (k, sid), (k + 1, sid), d + self.dwell_s,
+                                    ((nxt, d), (sid, d + self.dwell_s)))
+                    continue
+                act = self.graph[nxt]
+                if geom_key(nxt) in dead:
+                    continue
+                for s2 in act.next:
+                    if self.graph[s2].kind == "S" and geom_key(s2) not in dead:
+                        nd = d + float(act.duration_s)
+                        self._relax(dist, parent, heap, (k, sid), (k, s2), nd, ((nxt, d), (s2, nd)))
+        if goal is None:
+            return None
+        segs, key = [], goal
+        while parent[key] is not None:
+            prev, seg = parent[key]
+            segs.append(seg)
+            key = prev
+        path = [(start_sid, float(t_start))]
+        for seg in reversed(segs):
+            path.extend((s, t0 + rel) for s, rel in seg)
+        if self.path_conflicts(path, table):
+            self.stats["fallback_invalid"] += 1
+            return None
+        return TaskPlan(path, str(home), True, 0, t_star)
+
+    @staticmethod
+    def _relax(dist, parent, heap, key, key2, nd, seg) -> None:
+        if nd < dist.get(key2, INF) - EPS:
+            dist[key2] = nd
+            parent[key2] = (key, seg)
+            heapq.heappush(heap, (nd, key2[0], key2[1]))
+
     @staticmethod
     def _rebuild(parent, key, start_sid, t0) -> list[tuple[str, float]]:
         segs = []
