@@ -116,10 +116,14 @@ def _table(cons: Mapping[int, list[tuple[str, float, float]]], exclude: int) -> 
     return table
 
 
-class _Run:
+class Simulation:
+    """One lifelong run that can be advanced in steps (the live viewer does). GateError if the gate refuses."""
+
     def __init__(self, loaded: LoadedWorld, candidates: Iterable[str], cfg: SimConfig):
         self.cfg = cfg
         self.graph, self.conflicts, world = loaded.graph, loaded.conflicts, loaded.world
+        self.world = world
+        self.end = cfg.warmup_s + cfg.measure_s
         self.gate = check_gate(self.graph, self.conflicts, world.port_nodes, candidates, cfg.n_vehicles)
         if not self.gate.ok:
             raise GateError(self.gate)
@@ -127,7 +131,7 @@ class _Run:
         self.kernel = Kernel()
         self.tapg = Tapg(self.graph, self.conflicts)
         self.events: list[tuple] = []
-        self.ex = Executor(self.graph, self.tapg, self.kernel, world_geometry(world), world.accel_mps2,
+        self.executor = Executor(self.graph, self.tapg, self.kernel, world_geometry(world), world.accel_mps2,
                            world.decel_mps2, self._on_advance, self._on_exec_event)
         self.planner = SafeTailPlanner(self.graph, self.conflicts, self.sidings, budget=cfg.budget)
         self.ledger = SidingLedger(self.sidings)
@@ -155,7 +159,7 @@ class _Run:
         for vid, siding in zip(vids, starts):
             self.ledger.assign(vid, siding)
             self.tapg.add_vehicle(vid, initial_stop(self.graph, siding), 0.0)
-            self.ex.add(vid)
+            self.executor.add(vid)
         self.kernel.schedule(cfg.warmup_s, MCS, self._snapshot)
         for t, src in self.demand.first_arrivals():
             self.kernel.schedule(t, MCS, self._arrival, src)
@@ -171,7 +175,7 @@ class _Run:
             self._find_cycles(t)
 
     def _find_cycles(self, t: float) -> None:
-        for cyc in wait_cycles(self.ex.blocked_by()):
+        for cyc in wait_cycles(self.executor.blocked_by()):
             if cyc not in self.cycles_seen:
                 self.cycles_seen.add(cyc)
                 self.wait_cycles.append((t, cyc))
@@ -212,7 +216,7 @@ class _Run:
         span = self.span.get(vid)
         if span is None or span[0] != job.jid:
             return None
-        v, path = self.ex.vehicles[vid], self.tapg.paths[vid]
+        v, path = self.executor.vehicles[vid], self.tapg.paths[vid]
         lo, hi = max(v.path_idx, span[1]), min(len(path), span[2])
         if v.dwelling and lo < len(path) and path[lo][0].startswith("L,"):
             lo += 1
@@ -243,7 +247,7 @@ class _Run:
 
     def _check_arrival(self, vid: int, t: float) -> None:
         idx = self.arrival.get(vid)
-        if idx is not None and not self.notified.get(vid, False) and self.ex.vehicles[vid].path_idx >= idx:
+        if idx is not None and not self.notified.get(vid, False) and self.executor.vehicles[vid].path_idx >= idx:
             self.notified[vid] = True
             self._log(t, "arrived", vid, (idx,))
             self.kernel.schedule(t, MCS, self.mcs.vehicle_arrived, vid)
@@ -251,12 +255,12 @@ class _Run:
     # --- planning ----------------------------------------------------------------------------------------------
     def _prune(self, t: float) -> None:
         for vid in sorted(self.tapg.paths):
-            v = self.ex.vehicles[vid]
+            v = self.executor.vehicles[vid]
             n = min(v.path_idx, len(self.tapg.paths[vid]) - 1)
             if n <= 0:
                 continue
-            self.ex.wake(self.tapg.prune(vid, n), t)
-            self.ex.shift(vid, n)
+            self.executor.wake(self.tapg.prune(vid, n), t)
+            self.executor.shift(vid, n)
             if vid in self.arrival:
                 self.arrival[vid] -= n
                 if self.arrival[vid] < 0:
@@ -271,10 +275,10 @@ class _Run:
         if not self.pending and not force:
             return
         self._prune(t)
-        self.tapg.recompute(t, self.ex.inprog_end())
-        self.ex.wake_ready(t)
+        self.tapg.recompute(t, self.executor.inprog_end())
+        self.executor.wake_ready(t)
         tasks = sorted((self.dispatch_t.get(vid, t), vid) for vid in self.pending)
-        cons = live_constraints(self.tapg, self.ex, t)
+        cons = live_constraints(self.tapg, self.executor, t)
         for _dt, vid in tasks:
             legs = self.pending[vid]
             path = self.tapg.paths[vid]
@@ -287,7 +291,7 @@ class _Run:
                 continue
             self._check_plan(t, vid, res, legs)
             old_len = len(path)
-            moving = self.ex.vehicles[vid].state != "DONE"
+            moving = self.executor.vehicles[vid].state != "DONE"
             self.tapg.append(vid, res.path)
             if self.tapg.has_cycle():
                 self.counts["event_cycles"] += 1
@@ -302,7 +306,7 @@ class _Run:
             self.span[vid] = (job.jid, old_len, old_len + len(res.path) - 1)
             cons[vid] = [c for c in cons[vid] if c[2] != INF] + path_constraints(res.path, self.graph, self.conflicts)
             self._check_tapg(t, vid, old_len)
-            self.ex.kick(vid, t)
+            self.executor.kick(vid, t)
             self.commits.append(Commit(t, vid, tuple(legs), start_sid, start_t, moving, res.fallback))
             self.counts["commits"] += 1
             self._log(t, "commit", vid, (tuple(legs), res.siding, res.fallback))
@@ -312,7 +316,7 @@ class _Run:
         self._find_cycles(t)
 
     def _check_plan(self, t: float, vid: int, res, legs) -> None:
-        others = {u: live_entries(self.tapg.paths[u], self.ex.vehicles[u].path_idx, self.ex.vehicles[u].claim_idx,
+        others = {u: live_entries(self.tapg.paths[u], self.executor.vehicles[u].path_idx, self.executor.vehicles[u].claim_idx,
                                   t) for u in sorted(self.tapg.paths) if u != vid}
         for o in path_vs_entries(res.path, others, self.conflicts):
             self.checks["plan_overlaps"].append({"t": t, "vid": vid, **o})
@@ -332,17 +336,30 @@ class _Run:
             if u == vid:
                 continue
             pu = self.tapg.paths[u]
-            others[u] = [(j, pu[j][0], self.tapg.key(u, j)) for j in range(self.ex.vehicles[u].path_idx, len(pu))
+            others[u] = [(j, pu[j][0], self.tapg.key(u, j)) for j in range(self.executor.vehicles[u].path_idx, len(pu))
                          if self.tapg.key(u, j) in self.tapg]
         for o in unprotected(mine, others, self.tapg.related, self.conflicts):
             self.checks["unprotected"].append({"t": t, "vid": vid, **o})
 
     # --- the run -----------------------------------------------------------------------------------------------
-    def run(self) -> SimResult:
-        cfg = self.cfg
-        self.kernel.run_until(cfg.warmup_s + cfg.measure_s, cfg.dt)
+    @property
+    def now(self) -> float:
+        return self.kernel.now
+
+    @property
+    def stopped(self) -> bool:
+        """The run stopped early (global freeze)."""
+        return self.kernel.stopped
+
+    def advance_to(self, t: float) -> None:
+        """Run every event up to min(t, end); the event log does not depend on how the run is cut into steps."""
+        if not self.kernel.stopped and self.kernel.now < self.end:
+            self.kernel.run_until(min(t, self.end), self.cfg.dt)
+
+    def result(self) -> SimResult:
+        """The result of the run up to now."""
         t_end = self.kernel.now
-        timelines = {vid: v.executed for vid, v in self.ex.vehicles.items()}
+        timelines = {vid: v.executed for vid, v in self.executor.vehicles.items()}
         self.checks["executed_overlaps"] = pairwise_overlaps(timelines, self.conflicts)
         stats = dict(sorted(self.planner.stats.items())) | self.counts | {"stray_arrivals": self.mcs.stray_arrivals}
         blob = json.dumps(self.events, separators=(",", ":")).encode()
@@ -387,4 +404,6 @@ class _Run:
 
 def simulate(loaded: LoadedWorld, candidates: Iterable[str], cfg: SimConfig) -> SimResult:
     """One lifelong run. GateError if the gate refuses the candidates for cfg.n_vehicles."""
-    return _Run(loaded, candidates, cfg).run()
+    sim = Simulation(loaded, candidates, cfg)
+    sim.advance_to(sim.end)
+    return sim.result()

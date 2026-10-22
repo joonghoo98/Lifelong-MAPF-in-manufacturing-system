@@ -114,3 +114,17 @@ def test_every_dispatch_prunes_and_recomputes(mini, monkeypatch):  # final revie
     r = short(mini)
     dispatches = sum(j.t_assigned is not None for j in r.jobs) + sum(j.t_pickup_arr is not None for j in r.jobs)
     assert len(times) == dispatches
+
+
+@pytest.mark.parametrize("chunks", [[37.0], [0.3, 1.7, 400.0], [899.9, 900.0, 5000.0]])
+def test_advancing_in_chunks_keeps_the_event_log(mini, base, chunks):  # Review Focus 1
+    from agvtb.sim.simulator import Simulation
+
+    lw, cands = mini
+    sim = Simulation(lw, cands, SimConfig(4, 2.0, 0, 0.0, 900.0, 0.5))
+    t = 0.0
+    while sim.now < sim.end and not sim.stopped:
+        for step in chunks:
+            t += step
+            sim.advance_to(t)
+    assert sim.result().events_sha256 == base.events_sha256 and sim.now == 900.0
