@@ -6,7 +6,8 @@ The events are run by the simulation's own kernel, so the drawing speed never ch
 drawn once onto a background surface.
 
 Keys: S speed, W warm-up, T sim time (type a number, Enter; Esc cancels), F fast run (F again stops it), Space
-pause, + / - speed step, . one dt step while paused, Esc quit. A fast run computes event to event without pacing, up
+pause, + / - speed step, . one dt step while paused, E stop the run where it is (the window stays; user decision,
+2026-10-22), Esc quit. A fast run computes event to event without pacing, up
 to warm-up + sim time, then goes on at the set speed (user decision, 2026-10-22); it draws and reads the keys about
 every 0.1 s of wall time, which only decides when to draw, never what happens. The KPI lines are those of
 [warm-up end, now], as DAIM measures after its warm-up.
@@ -127,7 +128,7 @@ class Viewer:
             return f"{FIELD_NAME[self.editing]} = {self.buffer}_   (Enter to set, Esc to cancel)"
         fast = f"  FAST to t {self.fast_target:.0f} s" if self.fast_target is not None else ""
         return (f"[S] speed x{self.speed:g}  [W] warm-up {self.warmup:g} s  [T] sim time {self.sim_time:g} s  "
-                f"[F] fast run{fast}")
+                f"[F] fast run{fast}  [E] stop")
 
     def draw(self, extra: str | None = None) -> None:
         """Draw the scene of now and show it."""
@@ -179,6 +180,8 @@ class Viewer:
             target = self.warmup + self.sim_time
             if target > self.sim.now:
                 self.fast_target, self.paused = target, False
+        elif event.key == pygame.K_e:
+            return "stopped"
         elif event.key == pygame.K_ESCAPE:
             return "quit"
         if event.key == pygame.K_SPACE:
@@ -192,8 +195,8 @@ class Viewer:
         return None
 
     def run(self, max_frames: int | None = None, clock: Callable[[], float] = time.perf_counter) -> str:
-        """Advance and draw until the window is closed ("quit"), the run ends ("end"), it freezes ("frozen") or
-        max_frames frames were drawn ("frames")."""
+        """Advance and draw until the window is closed ("quit"), E stops the run ("stopped"), the run ends ("end"),
+        it freezes ("frozen") or max_frames frames were drawn ("frames")."""
         last, frames = None, 0
         while True:
             for event in pygame.event.get():

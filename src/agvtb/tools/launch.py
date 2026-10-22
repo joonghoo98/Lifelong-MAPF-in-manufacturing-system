@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None, input_fn=input, run: Callable[[list[str]
             print()
             return 1
         print("In the window: S speed, W warm-up, T sim time (type a number, Enter), F fast run, Space pause, "
-              "Esc quit.", flush=True)
+              "E stop, Esc quit.", flush=True)
         code = run(args)
         if code != 3:
             return code

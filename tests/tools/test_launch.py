@@ -59,3 +59,8 @@ def test_words_get_a_plain_message():
     shown = []
     build_argv(feed("abc", "", "abc", "", "abc", "", "abc", ""), shown.append, CONFIGS)
     assert len(shown) > 4 and not any("invalid literal" in line or "could not convert" in line for line in shown)
+
+
+def test_the_keys_shown_include_the_stop_key(capsys):  # user 2026-10-22 (다)
+    main(input_fn=feed("", "", "", ""), run=lambda argv: 0, root=CONFIGS)
+    assert "E stop" in capsys.readouterr().out

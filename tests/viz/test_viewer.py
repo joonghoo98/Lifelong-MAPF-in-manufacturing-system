@@ -218,3 +218,17 @@ def test_the_window_closes_before_the_summary_is_computed(tmp_path, monkeypatch)
     argv = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--screenshot",
             str(tmp_path / "shot.png"), "--at", "60"]
     assert main(argv) == 0 and seen == [False]
+
+
+def test_e_stops_the_run_where_it_is():  # user 2026-10-22 (다): a stop key apart from the fast run
+    v = Viewer(make(math.inf))
+    press(pygame.K_s, pygame.K_e, pygame.K_5, pygame.K_RETURN)  # E while a number is typed is not a stop
+    assert v.run(max_frames=3, clock=ticking(1.0)) == "frames" and v.speed == 5.0
+    press(pygame.K_f)
+    v.run(max_frames=1, clock=costly(v.sim))
+    t = v.sim.now
+    press(pygame.K_e)  # during a fast run too
+    assert v.run(max_frames=100, clock=costly(v.sim)) == "stopped" and v.sim.now == t
+    assert "[E] stop" in v._settings_line()
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+    assert v.hold() == "quit" and v.sim.now == t
