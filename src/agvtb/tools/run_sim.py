@@ -89,7 +89,9 @@ def main(argv: list[str] | None = None) -> int:
         for violation in err.report.violations:
             print(f"  {violation}")
         return 3
+    wall_s = time.perf_counter() - started
     if args.out is not None:
+        spans = [j.t_completed - j.t_assigned for j in result.jobs if j.t_completed is not None]
         data = {
             "config": str(args.config), "map": lw.world.name, "map_sha256": lw.map_sha256,
             "sidings_choice": choice.name, "vehicles": args.vehicles, "rate_per_min": args.rate, "seed": args.seed,
@@ -98,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
             "fromto": args.fromto, "ok": result.ok, "gate": result.gate.summary(), "kpi": result.kpi,
             "deadlock": result.deadlock, "checks": result.checks, "stats": result.stats,
             "events_sha256": result.events_sha256, "n_events": result.n_events, "t_end": result.t_end,
+            # for the DAIM st24 comparison (M4c): wall time of the run (a measurement, never an input), the longest
+            # assignment-to-completion of any job in the whole run (st24's job_assign_to_done_max_s), jobs created
+            "wall_s": wall_s, "job_max_s": max(spans) if spans else None, "jobs_created": len(result.jobs),
         }
         Path(args.out).write_text(json.dumps(data), encoding="utf-8")
     findings = sum(len(found) for found in result.checks.values())
@@ -105,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{lw.world.name}: {result.kpi['completed']} jobs completed, global deadlock {d['global']}, "
           f"partial {d['partial_jobs'] + d['held_at_end']}, wait cycles {len(d['wait_cycles'])}, "
           f"{findings} check findings")
-    print(f"time: {time.perf_counter() - started:.2f} s")  # on screen only, never in the result
+    print(f"time: {wall_s:.2f} s")  # a measurement: in the result JSON as wall_s, never an input of the run
     return 0 if result.ok else 1
 
 
