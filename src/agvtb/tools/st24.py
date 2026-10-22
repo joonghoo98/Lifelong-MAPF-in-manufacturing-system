@@ -39,11 +39,11 @@ def st24_conditions(st24_dir: Path, configs_dir: Path = Path("configs/maps/daim"
     out = []
     for name in _summary(st24_dir):
         engine, seed, lam = parse_condition(name)
-        config = Path(configs_dir) / f"grid_songdo_{engine}.json"
+        config = (Path(configs_dir) / f"grid_songdo_{engine}.json").resolve()  # any folder works (final review I4)
         map_path = load_map_config(config).map_path
         out.append({"name": name, "config": str(config), "vehicles": VEHICLES, "rate": lam, "seed": seed,
                     "warmup": WARMUP_S, "measure": MEASURE_S, "sidings": "recorded",
-                    "fromto": str(map_path.with_name(f"{map_path.stem}_fromto_AGV.csv"))})
+                    "fromto": str(map_path.with_name(f"{map_path.stem}_fromto_AGV.csv").resolve())})
     return out
 
 
@@ -63,7 +63,8 @@ def daim_record(st24_dir: Path, name: str, summary_row: dict) -> dict:
     return {"t_end": r["t_end"], "frozen": r.get("frozen_at_s") or ("stopped early" if r.get("stopped_early") else None),
             "partial": v["jobs_over_30min"] + v["held_over_30min"], "job_max": v["job_assign_to_done_max_s"],
             "cycles": st("exec_cycles"), "event_cycles": st("event_cycles"), "findings": st("validator_violations"),
-            "plan_fail": st("fallback_fail"), "thr_h": win["throughput_min"] * 60, "cycle": win["avg_cycle_s"],
+            "plan_fail": st("fallback_fail"), "sidings": rs.get("safe_tail_sidings"),
+            "aisle": (rs.get("safe_tail_map") or {}).get("aisle_size"), "thr_h": win["throughput_min"] * 60, "cycle": win["avg_cycle_s"],
             "deliver": win["avg_deliver_s"], "util": win["utilization_agv"], "completed": win["completed"],
             "created": kall["completed"] + kall["waiting_loads"] + kall["active_loads"], "wall": v["wall_s"]}
 
@@ -75,6 +76,8 @@ def our_record(result: dict, name: str) -> dict:
             "sidings_choice": "recorded"}
     got = {key: result[key] for key in want}
     assert got == want, (name, got)
+    assert Path(result["config"]).name == f"grid_songdo_{engine}.json", (name, result["config"])
+    assert Path(result["fromto"] or "").name == f"grid_songdo_{engine}_fromto_AGV.csv", (name, result["fromto"])
     k, d, s = result["kpi"], result["deadlock"], result["stats"]
     return {"pass": passed(result), "t_end": result["t_end"], "frozen": d["frozen_at"] if d["global"] else None,
             "partial": d["partial_jobs"] + d["held_at_end"], "job_max": result["job_max_s"],
@@ -82,7 +85,8 @@ def our_record(result: dict, name: str) -> dict:
             "findings": sum(len(x) for x in result["checks"].values()), "plan_fail": s.get("plan_fail", 0),
             "thr_h": k["throughput_per_h"], "cycle": k["cycle_s"], "deliver": k["deliver_s"], "util": k["utilization"],
             "completed": k["completed"], "created": result["jobs_created"], "wall": result["wall_s"],
-            "sha": result["events_sha256"]}
+            "sha": result["events_sha256"], "sidings": result["gate"]["condition_m"]["sidings"],
+            "aisle": result["gate"]["condition_m"]["aisle_size"]}
 
 
 def _f(value, fmt="{:.1f}"):
@@ -90,25 +94,36 @@ def _f(value, fmt="{:.1f}"):
 
 
 def compare_table(st24_dir: Path, results_dir: Path) -> str:
-    """Markdown: "pass k/n" over the conditions that have a result, then one row per condition."""
-    head = ("| condition | pass | end s | frozen | partial | longest job s ours/DAIM | cycles | findings ours/DAIM | "
-            "plan fail | throughput/h ours/DAIM | cycle s ours/DAIM | deliver s ours/DAIM | utilization ours/DAIM | sha |")
-    rows, n_run, n_pass = [head, "|" + "---|" * 14], 0, 0
-    for name, row in _summary(st24_dir).items():
+    """Markdown: "pass k/n (N conditions, m not run)" over the conditions that have a result, then one row per
+    condition, ours/DAIM side by side."""
+    head = ("| condition | pass | end s | frozen | partial ours/DAIM | longest job s ours/DAIM | cycles ours/DAIM | "
+            "findings ours/DAIM | plan fail ours/DAIM | throughput/h ours/DAIM | cycle s ours/DAIM | "
+            "deliver s ours/DAIM | utilization ours/DAIM | sha |")
+    rows, n_run, n_pass, summary = [head, "|" + "---|" * 14], 0, 0, _summary(st24_dir)
+    for name, row in summary.items():
         dm = daim_record(st24_dir, name, row)
-        path = Path(results_dir) / f"{name}.json"
-        if not path.exists():
-            rows.append(f"| {name} | not run | | | | -/{_f(dm['job_max'])} | | -/{dm['findings']} | | "
-                        f"-/{_f(dm['thr_h'])} | -/{_f(dm['cycle'])} | -/{_f(dm['deliver'])} | -/{_f(dm['util'], '{:.3f}')} | |")
+        try:  # a missing or half-written result is a run not done (final review I3)
+            result = json.loads((Path(results_dir) / f"{name}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            result = None
+        if result is None:
+            rows.append(f"| {name} | not run | | | -/{dm['partial']} | -/{_f(dm['job_max'])} | "
+                        f"-/{dm['cycles']}+{dm['event_cycles']} | -/{dm['findings']} | -/{dm['plan_fail']} | "
+                        f"-/{_f(dm['thr_h'])} | -/{_f(dm['cycle'])} | -/{_f(dm['deliver'])} | "
+                        f"-/{_f(dm['util'], '{:.3f}')} | |")
             continue
-        o = our_record(json.loads(path.read_text(encoding="utf-8")), name)
+        o = our_record(result, name)
+        assert dm["sidings"] in (None, o["sidings"]) and dm["aisle"] in (None, o["aisle"]), (name, "sidings differ")
         n_run, n_pass = n_run + 1, n_pass + o["pass"]
         rows.append(f"| {name} | {'yes' if o['pass'] else '**NO**'} | {o['t_end']:.0f} | {o['frozen'] or '-'} | "
-                    f"{o['partial']} | {_f(o['job_max'])}/{_f(dm['job_max'])} | {o['cycles']}+{o['event_cycles']} | "
-                    f"{o['findings']}/{dm['findings']} | {o['plan_fail']} | {_f(o['thr_h'])}/{_f(dm['thr_h'])} | "
-                    f"{_f(o['cycle'])}/{_f(dm['cycle'])} | {_f(o['deliver'])}/{_f(dm['deliver'])} | "
-                    f"{_f(o['util'], '{:.3f}')}/{_f(dm['util'], '{:.3f}')} | `{o['sha'][:12]}` |")
-    return "\n".join([f"pass {n_pass}/{n_run}", ""] + rows) + "\n"
+                    f"{o['partial']}/{dm['partial']} | {_f(o['job_max'])}/{_f(dm['job_max'])} | "
+                    f"{o['cycles']}+{o['event_cycles']}/{dm['cycles']}+{dm['event_cycles']} | "
+                    f"{o['findings']}/{dm['findings']} | {o['plan_fail']}/{dm['plan_fail']} | "
+                    f"{_f(o['thr_h'])}/{_f(dm['thr_h'])} | {_f(o['cycle'])}/{_f(dm['cycle'])} | "
+                    f"{_f(o['deliver'])}/{_f(dm['deliver'])} | {_f(o['util'], '{:.3f}')}/{_f(dm['util'], '{:.3f}')} | "
+                    f"`{o['sha'][:12]}` |")
+    top = f"pass {n_pass}/{n_run} ({len(summary)} conditions, {len(summary) - n_run} not run)"
+    return "\n".join([top, ""] + rows) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:

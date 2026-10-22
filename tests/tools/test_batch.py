@@ -50,3 +50,24 @@ def test_passed_is_the_m4c_rule():
     assert passed(good)
     for bad in ({"ok": False}, {"t_end": 899.0}, {"job_max_s": None}, {"job_max_s": 1800.0}, {"stats": {"plan_fail": 1}}):
         assert not passed(good | bad)
+
+
+def test_a_result_of_another_condition_is_run_again(tmp_path):  # final review I1
+    run_batch([mini("a", seed=1)], tmp_path, workers=1)
+    out = run_batch([mini("a", seed=2)], tmp_path, workers=1)
+    assert out[0]["skipped"] is False and json.loads((tmp_path / "a.json").read_text(encoding="utf-8"))["seed"] == 2
+
+
+def test_a_skipped_run_keeps_its_result(tmp_path):  # final review I2: a stored "not ok" is not exit 0
+    run_batch([mini("a")], tmp_path, workers=1)
+    data = json.loads((tmp_path / "a.json").read_text(encoding="utf-8"))
+    (tmp_path / "a.json").write_text(json.dumps(data | {"ok": False}), encoding="utf-8")
+    assert run_batch([mini("a")], tmp_path, workers=1)[0] == {"name": "a", "exit": 1, "skipped": True}
+
+
+def test_rates_keep_every_digit_and_the_summary_keeps_to_the_conditions(tmp_path):  # final review minors
+    from agvtb.tools.batch import run_argv
+    assert run_argv(mini("a", rate=0.1234567), tmp_path / "a.json")[4] == "0.1234567"
+    run_batch([mini("a")], tmp_path, workers=1)
+    (tmp_path / "conds.json").write_text(json.dumps([mini("a")]), encoding="utf-8")
+    assert [r["name"] for r in summary_rows(tmp_path, ["a"])] == ["a"]

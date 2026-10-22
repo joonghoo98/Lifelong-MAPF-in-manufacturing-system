@@ -36,9 +36,9 @@ def passed(result: dict) -> bool:
 
 
 def run_argv(cond: dict, out_json: Path) -> list[str]:
-    """The run_sim arguments of a condition."""
-    argv = [cond["config"], "--vehicles", str(cond["vehicles"]), "--rate", f"{cond['rate']:g}", "--seed",
-            str(cond["seed"]), "--warmup", f"{cond['warmup']:g}", "--measure", f"{cond['measure']:g}"]
+    """The run_sim arguments of a condition (numbers in full: repr, not :g)."""
+    argv = [cond["config"], "--vehicles", str(cond["vehicles"]), "--rate", repr(cond["rate"]), "--seed",
+            str(cond["seed"]), "--warmup", repr(cond["warmup"]), "--measure", repr(cond["measure"])]
     if cond.get("sidings") is not None:
         argv += ["--sidings", cond["sidings"]]
     if cond.get("fromto") is not None:
@@ -46,12 +46,26 @@ def run_argv(cond: dict, out_json: Path) -> list[str]:
     return argv + ["--out", str(out_json)]
 
 
-def _done(path: Path) -> bool:
+def _stored(path: Path) -> dict | None:
+    """The result JSON at path, or None if it is missing or cannot be read (a run cut while writing)."""
     try:
-        json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False
-    return True
+        return None
+    return data if isinstance(data, dict) and "kpi" in data else None
+
+
+def _same_file(a: str | None, b: str | None) -> bool:
+    return a is None and b is None or (a is not None and b is not None and Path(a).resolve() == Path(b).resolve())
+
+
+def _is_run_of(result: dict, cond: dict) -> bool:
+    """The stored result is the run of this condition (final review I1: a name alone proves nothing)."""
+    return (_same_file(result["config"], cond["config"]) and _same_file(result["fromto"], cond.get("fromto"))
+            and result["vehicles"] == cond["vehicles"] and result["rate_per_min"] == cond["rate"]
+            and result["seed"] == cond["seed"] and result["warmup_s"] == cond["warmup"]
+            and result["measure_s"] == cond["measure"]
+            and (cond.get("sidings") is None or result["sidings_choice"] == cond["sidings"]))
 
 
 def run_batch(conds: list[dict], out_dir: Path, workers: int, python: str = sys.executable) -> list[dict]:
@@ -61,7 +75,11 @@ def run_batch(conds: list[dict], out_dir: Path, workers: int, python: str = sys.
         raise ValueError(f"condition names repeat: {sorted({n for n in names if names.count(n) > 1})}")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    results = {c["name"]: {"name": c["name"], "exit": 0, "skipped": True} for c in conds if _done(out_dir / f"{c['name']}.json")}
+    results = {}
+    for c in conds:  # a stored run of this very condition is kept; its exit is that of its result (final review I2)
+        stored = _stored(out_dir / f"{c['name']}.json")
+        if stored is not None and _is_run_of(stored, c):
+            results[c["name"]] = {"name": c["name"], "exit": 0 if stored["ok"] else 1, "skipped": True}
 
     def one(cond: dict) -> int:
         with open(out_dir / f"{cond['name']}.log", "w", encoding="utf-8") as log:
@@ -79,13 +97,13 @@ def run_batch(conds: list[dict], out_dir: Path, workers: int, python: str = sys.
     return [results[n] for n in names]
 
 
-def summary_rows(out_dir: Path) -> list[dict]:
-    """One row per readable result JSON in out_dir, sorted by name."""
+def summary_rows(out_dir: Path, names: list[str] | None = None) -> list[dict]:
+    """One row per readable result JSON in out_dir (only those of names, if given), sorted by name."""
     rows = []
     for path in sorted(Path(out_dir).glob("*.json")):
-        if not _done(path):
+        r = _stored(path)
+        if r is None or (names is not None and path.stem not in names):
             continue
-        r = json.loads(path.read_text(encoding="utf-8"))
         k, d = r["kpi"], r["deadlock"]
         rows.append({"name": path.stem, "ok": r["ok"], "passed": passed(r), "t_end": r["t_end"], "global": d["global"],
                      "partial": d["partial_jobs"] + d["held_at_end"], "wait_cycles": len(d["wait_cycles"]),
@@ -96,13 +114,13 @@ def summary_rows(out_dir: Path) -> list[dict]:
     return rows
 
 
-def write_summary(out_dir: Path) -> Path:
-    """summary.csv of out_dir (columns SUMMARY_COLUMNS)."""
+def write_summary(out_dir: Path, names: list[str] | None = None) -> Path:
+    """summary.csv of out_dir (columns SUMMARY_COLUMNS), only the runs of names if given."""
     path = Path(out_dir) / "summary.csv"
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, SUMMARY_COLUMNS)
         writer.writeheader()
-        writer.writerows(summary_rows(out_dir))
+        writer.writerows(summary_rows(out_dir, names))
     return path
 
 
@@ -145,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     conds = json.loads(Path(args.conds).read_text(encoding="utf-8"))
     out = run_batch(conds, Path(args.out), args.workers)
-    path = write_summary(Path(args.out))
+    path = write_summary(Path(args.out), [c["name"] for c in conds])
     bad = [r for r in out if r["exit"] != 0]
     print(f"{len(out)} conditions, {sum(r['skipped'] for r in out)} skipped, {len(bad)} not ok "
           f"{[(r['name'], r['exit']) for r in bad]}; summary: {path}")
