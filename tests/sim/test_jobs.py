@@ -41,3 +41,15 @@ def test_completion_assigns_the_next_waiting_job_at_once():
     k.schedule(20.0, MCS, mcs.vehicle_arrived, 0)
     k.run_until(100.0, dt=1.0)
     assert got == [(0, "A", 1.0), (0, "B", 3.0), (1, "A", 30.0)] and [j.jid for j in mcs.waiting()] == []
+
+
+def test_busy_time_over_any_window():  # the viewer's KPI window can start anywhere (user, 2026-10-22)
+    k = Kernel()
+    mcs = Mcs(k, 10.0, [0], lambda v, s: 1.0, lambda vid, jb, goal, t: k.schedule(
+        t + (61.0 if goal == jb.src else 113.0), MCS, mcs.vehicle_arrived, vid))
+    k.schedule(1.603, MCS, lambda t: mcs.create(t, "A", "B"))
+    k.run_until(100.0, dt=1.0)
+    assert round(mcs.busy_between(0, 0.0, 100.0), 3) == 98.397  # still busy at 100
+    k.run_until(400.0, dt=1.0)
+    assert [round(mcs.busy_between(0, a, b), 3) for a, b in ((0.0, 400.0), (100.0, 400.0), (0.0, 50.0))] == [
+        184.0, 85.603, 48.397]

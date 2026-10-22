@@ -64,6 +64,7 @@ class Mcs:
         self._waiting: dict[str, list[Job]] = {}
         self._busy_since: dict[int, float] = {}
         self._busy_total = {vid: 0.0 for vid in self.phase}
+        self._busy_done: dict[int, list[tuple[float, float]]] = {vid: [] for vid in self.phase}  # closed spans
 
     def waiting(self) -> list[Job]:
         """The jobs not yet assigned: source ports in sorted order, each in creation order."""
@@ -73,6 +74,13 @@ class Mcs:
         """Time vehicle vid spent between an assignment and that job's completion, up to t."""
         since = self._busy_since.get(vid)
         return self._busy_total[vid] + (t - since if since is not None else 0.0)
+
+    def busy_between(self, vid: int, a: float, b: float) -> float:
+        """Busy time of vehicle vid inside [a, b] (assignment to completion, the open span up to b)."""
+        spans = list(self._busy_done[vid])
+        if vid in self._busy_since:
+            spans.append((self._busy_since[vid], b))
+        return sum(max(0.0, min(e, b) - max(s, a)) for s, e in spans)
 
     def create(self, t: float, src: str, dst: str) -> Job:
         job = Job(len(self.jobs), src, dst, t)
@@ -118,7 +126,9 @@ class Mcs:
             self.phase[vid] = "TO_DELIVERY"
             return
         job.t_completed = t
-        self._busy_total[vid] += t - self._busy_since.pop(vid)
+        since = self._busy_since.pop(vid)
+        self._busy_total[vid] += t - since
+        self._busy_done[vid].append((since, t))
         self.phase[vid] = "IDLE"
         del self.held[vid]
         self.on_complete(job)

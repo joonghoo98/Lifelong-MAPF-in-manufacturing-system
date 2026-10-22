@@ -154,13 +154,11 @@ class Simulation:
         self.last_completion = 0.0
         self.n_completed = 0
         self.frozen = False
-        self.snap: dict | None = None
         starts = random.Random(cfg.seed).sample(self.sidings, cfg.n_vehicles)
         for vid, siding in zip(vids, starts):
             self.ledger.assign(vid, siding)
             self.tapg.add_vehicle(vid, initial_stop(self.graph, siding), 0.0)
             self.executor.add(vid)
-        self.kernel.schedule(cfg.warmup_s, MCS, self._snapshot)
         for t, src in self.demand.first_arrivals():
             self.kernel.schedule(t, MCS, self._arrival, src)
         self.kernel.schedule(FREEZE_S, MCS, self._freeze_check, 0)
@@ -236,10 +234,6 @@ class Simulation:
             self.frozen = True
             self._log(t, "frozen", seen, ())
             self.kernel.stop()
-
-    def _snapshot(self, t: float) -> None:
-        self.snap = {"t": t, "created": len(self.mcs.jobs),
-                     "busy": sum(self.mcs.busy_s(v, t) for v in self.mcs.phase)}
 
     # --- arrival notices ---------------------------------------------------------------------------------------
     def _on_advance(self, vid: int, path_idx: int, t: float) -> None:
@@ -363,32 +357,33 @@ class Simulation:
         self.checks["executed_overlaps"] = pairwise_overlaps(timelines, self.conflicts)
         stats = dict(sorted(self.planner.stats.items())) | self.counts | {"stray_arrivals": self.mcs.stray_arrivals}
         blob = json.dumps(self.events, separators=(",", ":")).encode()
-        return SimResult(self.gate, self._kpi(t_end), self._deadlock(t_end), self.checks, stats,
+        return SimResult(self.gate, self.kpi(self.cfg.warmup_s, t_end), self._deadlock(t_end), self.checks, stats,
                          hashlib.sha256(blob).hexdigest(), len(self.events), t_end, self.mcs.jobs, self.commits)
 
-    def _kpi(self, t_end: float) -> dict:
-        w0 = self.cfg.warmup_s
-        window = t_end - w0
-        done = [j for j in self.mcs.jobs if j.t_completed is not None and w0 <= j.t_completed <= t_end]
+    def kpi(self, w0: float, t: float) -> dict:
+        """KPIs of the window [w0, t], as DAIM's runner measures them after its warm-up (research §F2): jobs
+        completed in the window, throughput per hour, mean cycle (created to completed), wait, retrieve and
+        deliver (load end to completed) times, utilization (busy time over window x vehicles), arrivals per
+        minute, and the backlog at t. Rates are None when the window is empty."""
+        window = t - w0
+        done = [j for j in self.mcs.jobs if j.t_completed is not None and w0 <= j.t_completed <= t]
         n = len(done)
 
         def mean(values):
             values = list(values)
             return sum(values) / len(values) if values else None
 
-        busy0 = self.snap["busy"] if self.snap else 0.0
-        created0 = self.snap["created"] if self.snap else 0
-        busy1 = sum(self.mcs.busy_s(v, t_end) for v in self.mcs.phase)
-        ok_window = window > 0 and self.snap is not None
+        busy = sum(self.mcs.busy_between(v, w0, t) for v in self.mcs.phase)
+        created = sum(1 for j in self.mcs.jobs if w0 < j.t_created <= t)
         return {
             "completed": n,
-            "throughput_per_h": n / window * 3600 if ok_window else None,
+            "throughput_per_h": n / window * 3600 if window > 0 else None,
             "cycle_s": mean(j.t_completed - j.t_created for j in done),
             "wait_s": mean(j.t_assigned - j.t_created for j in done),
             "retrieve_s": mean(j.t_pickup_end - j.t_assigned for j in done),
             "deliver_s": mean(j.t_completed - j.t_pickup_end for j in done),
-            "utilization": (busy1 - busy0) / (window * len(self.mcs.phase)) if ok_window else None,
-            "arrivals_per_min": (len(self.mcs.jobs) - created0) / window * 60 if ok_window else None,
+            "utilization": busy / (window * len(self.mcs.phase)) if window > 0 else None,
+            "arrivals_per_min": created / window * 60 if window > 0 else None,
             "backlog_end": len(self.mcs.waiting()) + len(self.mcs.held),
         }
 

@@ -1,4 +1,5 @@
 import dataclasses
+import math
 import os
 import subprocess
 import sys
@@ -128,3 +129,25 @@ def test_advancing_in_chunks_keeps_the_event_log(mini, base, chunks):  # Review 
             t += step
             sim.advance_to(t)
     assert sim.result().events_sha256 == base.events_sha256 and sim.now == 900.0
+
+
+def test_kpi_over_a_window_is_the_runs_kpi(mini):  # user 2026-10-22: KPI after the warm-up, as DAIM
+    from agvtb.sim.simulator import Simulation
+
+    lw, cands = mini
+    sim = Simulation(lw, cands, SimConfig(4, 2.0, 0, 300.0, 600.0, 0.5))
+    sim.advance_to(sim.end)
+    k = sim.kpi(300.0, sim.now)
+    assert k == sim.result().kpi
+    busy = sum(sim.mcs.busy_between(v, 300.0, 900.0) for v in range(4))
+    assert k["utilization"] == pytest.approx(busy / (600.0 * 4))
+    assert sim.kpi(900.0, 900.0)["throughput_per_h"] is None  # an empty window
+
+
+def test_a_run_without_an_end_goes_on(mini):  # user 2026-10-22: the viewer runs until it is closed
+    from agvtb.sim.simulator import Simulation
+
+    lw, cands = mini
+    sim = Simulation(lw, cands, SimConfig(4, 2.0, 0, 0.0, math.inf, 0.5))
+    sim.advance_to(1000.0)
+    assert sim.now == 1000.0 and sim.end == math.inf and sim.result().kpi["completed"] > 0
