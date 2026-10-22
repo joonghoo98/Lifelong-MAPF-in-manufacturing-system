@@ -10,6 +10,7 @@ dependencies = ["shapely>=2.0", "matplotlib>=3.8"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+viz = ["pygame-ce>=2.5,<2.6"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
