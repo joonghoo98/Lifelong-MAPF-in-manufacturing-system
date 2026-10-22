@@ -220,15 +220,18 @@ def test_the_window_closes_before_the_summary_is_computed(tmp_path, monkeypatch)
     assert main(argv) == 0 and seen == [False]
 
 
-def test_e_stops_the_run_where_it_is():  # user 2026-10-22 (다): a stop key apart from the fast run
-    v = Viewer(make(math.inf))
+def test_e_stops_the_run_and_e_again_resumes_it():  # user 2026-10-22: (다) a stop key apart from the fast run,
+    v = Viewer(make(math.inf), warmup=0.0, sim_time=3600.0)  # then "정지된 상태에서 E를 다시 누르면 가동되게"
     press(pygame.K_s, pygame.K_e, pygame.K_5, pygame.K_RETURN)  # E while a number is typed is not a stop
-    assert v.run(max_frames=3, clock=ticking(1.0)) == "frames" and v.speed == 5.0
+    assert v.run(max_frames=3, clock=ticking(1.0)) == "frames" and v.speed == 5.0 and not v.halted
     press(pygame.K_f)
     v.run(max_frames=1, clock=costly(v.sim))
     t = v.sim.now
-    press(pygame.K_e)  # during a fast run too
-    assert v.run(max_frames=100, clock=costly(v.sim)) == "stopped" and v.sim.now == t
-    assert "[E] stop" in v._settings_line()
-    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
-    assert v.hold() == "quit" and v.sim.now == t
+    press(pygame.K_e, pygame.K_SPACE, pygame.K_PERIOD, pygame.K_f)  # stopped: only E and Esc do anything
+    assert v.run(max_frames=5, clock=costly(v.sim)) == "frames" and v.sim.now == t and v.halted
+    assert "[E] resume" in v._settings_line()
+    press(pygame.K_e)
+    v.run(max_frames=2, clock=costly(v.sim))
+    assert v.sim.now > t and not v.halted and not v.paused and v.fast_target == 3600.0  # the fast run goes on
+    press(pygame.K_e, pygame.K_ESCAPE)
+    assert v.run(max_frames=5, clock=ticking(1.0)) == "quit"

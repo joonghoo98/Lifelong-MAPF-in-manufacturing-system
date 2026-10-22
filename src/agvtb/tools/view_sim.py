@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         viewer.save(args.screenshot)
         print(f"screenshot at t {sim.now:.1f} s: {args.screenshot}")
     else:
-        if viewer.run() in ("end", "frozen", "stopped"):
+        if viewer.run() in ("end", "frozen"):
             viewer.hold()
     pygame.quit()  # close the window first: the overlap check of a long run takes a while (final review I3)
     print(f"checking the run up to t {sim.now:.1f} s ...", flush=True)
