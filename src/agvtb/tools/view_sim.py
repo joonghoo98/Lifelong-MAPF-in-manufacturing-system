@@ -1,7 +1,10 @@
 """Watch a lifelong simulation run live: python -m agvtb.tools.view_sim CONFIG --vehicles N --rate R.
 
-A pygame-ce window draws the run as it goes (user decision V1). Keys: Space pause, + / - speed (x1, 2, 5, 10, 30,
-100), . one dt step while paused, Esc quit. When the run ends or freezes the last frame stays until Esc. With
+A pygame-ce window draws the run as it goes (user decision V1). The run has no end: it goes on until the window is
+closed. In the window (user, 2026-10-22): S speed, W warm-up, T sim time (type a number, Enter), F fast run (event to
+event up to warm-up + sim time, then on at the speed), Space pause, + / - speed step, . one dt step while paused, Esc
+quit; the KPI lines are those of [warm-up end, now]. --warmup, --sim-time and --speed only set the starting values.
+If the run freezes the last frame stays until Esc. With
 --screenshot FILE --at T it advances to simulated time T, draws one frame, saves it as PNG and ends (works without
 a display with SDL_VIDEODRIVER=dummy). The viewer does not judge the run: it prints the same summary as run_sim and
 returns 0; 2 is a usage error and 3 a gate refusal, as in run_sim.
@@ -18,7 +21,6 @@ from agvtb.sim.simulator import SimConfig, Simulation
 from agvtb.world.config import load_map_config
 from agvtb.world.loader import load_world
 
-SPEEDS = (1.0, 2.0, 5.0, 10.0, 30.0, 100.0)
 INSTALL_HINT = 'the viewer needs pygame-ce: .venv/Scripts/python.exe -m pip install "pygame-ce>=2.5,<2.6"'
 
 
@@ -37,10 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--vehicles", type=int, required=True, metavar="N", help="number of vehicles (>= 1)")
     parser.add_argument("--rate", type=float, required=True, metavar="R", help="jobs per minute (>= 0)")
     parser.add_argument("--seed", type=int, default=0, metavar="X", help="seed of the start sidings and the demand")
-    parser.add_argument("--hours", type=float, default=24.0, metavar="H", help="length of the run (default 24)")
+    parser.add_argument("--warmup", type=float, default=3600.0, metavar="S", help="starting warm-up seconds (default 3600)")
+    parser.add_argument("--sim-time", type=float, default=86400.0, metavar="S",
+                        help="starting sim time of a fast run after the warm-up (default 86400)")
     parser.add_argument("--dt", type=float, default=0.5, metavar="S", help="clock step in seconds (default 0.5)")
     parser.add_argument("--speed", type=float, default=10.0, metavar="V",
-                        help="simulated seconds per wall second: 1, 2, 5, 10, 30 or 100 (default 10)")
+                        help="starting simulated seconds per wall second (default 10)")
     parser.add_argument("--size", default="1280x800", metavar="WxH", help="window size, each >= 200 (default 1280x800)")
     parser.add_argument("--sidings", metavar="CHOICE", help="siding variant (default: the config's)")
     parser.add_argument("--fromto", metavar="CSV", help="from-to rate table (default: uniform over the ports)")
@@ -49,12 +53,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.vehicles < 1:
         parser.error(f"--vehicles must be >= 1, got {args.vehicles}")
-    for name, value, ok in (("--rate", args.rate, args.rate >= 0), ("--hours", args.hours, args.hours > 0),
-                            ("--dt", args.dt, args.dt > 0)):
+    for name, value, ok in (("--rate", args.rate, args.rate >= 0), ("--warmup", args.warmup, args.warmup >= 0),
+                            ("--sim-time", args.sim_time, args.sim_time > 0), ("--dt", args.dt, args.dt > 0),
+                            ("--speed", args.speed, args.speed > 0)):
         if not (math.isfinite(value) and ok):
             parser.error(f"{name} is out of range, got {value}")
-    if args.speed not in SPEEDS:
-        parser.error(f"--speed must be one of {', '.join(f'{s:g}' for s in SPEEDS)}, got {args.speed:g}")
     size = _size(args.size)
     if size is None:
         parser.error(f"--size must be WxH with both >= 200, got {args.size}")
@@ -102,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as exc:
             parser.error(f"--fromto: {exc}")
 
-    sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, 0.0, args.hours * 3600.0, args.dt, None, fromto)
+    sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, args.warmup, math.inf, args.dt, None, fromto)
     try:
         sim = Simulation(lw, candidates, sim_cfg)
     except GateError as err:
@@ -113,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     import pygame  # only after the import of the viewer worked
 
     try:
-        viewer = Viewer(sim, size, args.speed)
+        viewer = Viewer(sim, size, args.speed, args.warmup, args.sim_time)
     except pygame.error as exc:
         parser.error(f"cannot open a window ({exc}); try SDL_VIDEODRIVER=dummy with --screenshot")
     if args.screenshot is not None:

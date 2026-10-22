@@ -9,7 +9,6 @@ from pathlib import Path
 
 from agvtb.world.config import load_map_config
 
-SPEEDS = (1.0, 2.0, 5.0, 10.0, 30.0, 100.0)
 DEFAULT_MAP = "mini_deadend"
 
 
@@ -60,15 +59,9 @@ def _rate(text: str) -> float:
     return value
 
 
-def _speed(text: str) -> float:
-    value = _number(text, float)
-    if value not in SPEEDS:
-        raise ValueError(f"needs one of {', '.join(f'{s:g}' for s in SPEEDS)}")
-    return value
-
-
 def build_argv(input_fn=input, print_fn=print, root: Path = Path("configs") / "maps") -> list[str]:
-    """Ask for the map, vehicles, jobs per minute, seed and speed; the arguments of view_sim."""
+    """Ask for the map, vehicles, jobs per minute and seed; the arguments of view_sim. Warm-up, sim time and speed
+    are set in the viewer itself (user, 2026-10-22)."""
     configs = runnable_configs(root)
     if not configs:
         raise SystemExit(f"no map config with a siding variant under {root}")
@@ -87,9 +80,7 @@ def build_argv(input_fn=input, print_fn=print, root: Path = Path("configs") / "m
     vehicles = _ask("Vehicles", 8, _int_at_least(1), input_fn, print_fn)
     rate = _ask("Jobs per minute", 2.0, _rate, input_fn, print_fn)
     seed = _ask("Seed", 0, _int_at_least(0), input_fn, print_fn)
-    speed = _ask("Speed (sim seconds per second)", 10.0, _speed, input_fn, print_fn)
-    return [str(chosen), "--vehicles", str(vehicles), "--rate", f"{rate:g}", "--seed", str(seed),
-            "--speed", f"{speed:g}"]
+    return [str(chosen), "--vehicles", str(vehicles), "--rate", f"{rate:g}", "--seed", str(seed)]
 
 
 def main(argv: list[str] | None = None, input_fn=input, run: Callable[[list[str]], int] | None = None,
@@ -104,7 +95,8 @@ def main(argv: list[str] | None = None, input_fn=input, run: Callable[[list[str]
         except (EOFError, KeyboardInterrupt):
             print()
             return 1
-        print("Keys in the window: Space pause, + / - speed, . one step while paused, Esc quit.", flush=True)
+        print("In the window: S speed, W warm-up, T sim time (type a number, Enter), F fast run, Space pause, "
+              "Esc quit.", flush=True)
         code = run(args)
         if code != 3:
             return code

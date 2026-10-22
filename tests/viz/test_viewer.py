@@ -1,3 +1,4 @@
+import math
 import os
 
 import pytest
@@ -60,8 +61,7 @@ def test_viewer_stops_with_the_run_and_holds_the_last_frame():  # Review Focus 4
 
 def test_cli_screenshot(tmp_path, capsys):
     out = tmp_path / "shot.png"
-    argv = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--hours", "0.1",
-            "--screenshot", str(out), "--at", "300"]
+    argv = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--screenshot", str(out), "--at", "300"]
     assert main(argv) == 0 and out.stat().st_size > 1000
     shown = capsys.readouterr().out
     assert "completed" in shown and "screenshot at t 300.0 s" in shown
@@ -104,3 +104,53 @@ def test_cli_refuses_a_folder_as_screenshot_and_a_live_run_without_a_display(tmp
     with pytest.raises(SystemExit) as exc:
         main(base)  # this module runs with SDL_VIDEODRIVER=dummy: a live window could never be seen or closed
     assert exc.value.code == 2
+
+
+def press(*keys):
+    for key in keys:
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
+
+
+def test_settings_are_typed_in():  # user 2026-10-22: number entry for speed, warm-up and sim time
+    v = Viewer(make())
+    press(pygame.K_s, pygame.K_2, pygame.K_5, pygame.K_RETURN, pygame.K_w, pygame.K_6, pygame.K_0, pygame.K_0,
+          pygame.K_RETURN, pygame.K_t, pygame.K_1, pygame.K_2, pygame.K_0, pygame.K_0, pygame.K_KP_ENTER)
+    assert v.run(max_frames=1, clock=ticking(1.0)) == "frames"
+    assert (v.speed, v.warmup, v.sim_time) == (25.0, 600.0, 1200.0)
+
+
+def test_a_bad_or_cancelled_entry_keeps_the_old_value():
+    v = Viewer(make())
+    press(pygame.K_s, pygame.K_0, pygame.K_RETURN, pygame.K_s, pygame.K_5, pygame.K_ESCAPE)
+    assert v.run(max_frames=1, clock=ticking(1.0)) == "frames"  # Esc while typing cancels, it does not quit
+    assert v.speed == 10.0 and v.editing is None
+
+
+def test_fast_mode_runs_to_warm_up_plus_sim_time_then_goes_on_at_speed():  # user 2026-10-22
+    v = Viewer(make(math.inf), speed=10.0, warmup=60.0, sim_time=240.0)
+    press(pygame.K_f)
+    v.run(max_frames=1, clock=ticking(1.0))
+    assert v.sim.now == 300.0 and v.fast_target is None
+    v.run(max_frames=3, clock=ticking(1.0))
+    assert v.sim.now == 320.0  # the run does not end there: it goes on at x10
+
+
+def test_fast_mode_does_not_change_the_events():
+    v = Viewer(make(math.inf), warmup=0.0, sim_time=600.0)
+    press(pygame.K_f)
+    v.run(max_frames=1, clock=ticking(1.0))
+    other = make(math.inf)
+    other.advance_to(600.0)
+    assert v.sim.result().events_sha256 == other.result().events_sha256
+
+
+def test_kpi_lines_after_the_warm_up():  # user 2026-10-22: KPI of [warm-up end, now], as DAIM
+    from agvtb.viz.scene import build_scene
+
+    sim = make(math.inf)
+    assert "warm-up: 100 s left" in build_scene(sim, 10.0, False, warmup=100.0).hud
+    sim.advance_to(700.0)
+    k = sim.kpi(100.0, 700.0)
+    lines = build_scene(sim, 10.0, False, warmup=100.0).hud
+    assert f"throughput {k['throughput_per_h']:.1f}/h  utilization {k['utilization']:.2f}" in lines[2]
+    assert f"cycle {k['cycle_s']:.1f} s  delivery {k['deliver_s']:.1f} s  done {k['completed']}" in lines[3]

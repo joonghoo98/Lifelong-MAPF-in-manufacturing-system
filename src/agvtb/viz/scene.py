@@ -34,8 +34,13 @@ class Scene:
     hud: tuple[str, ...]
 
 
-def build_scene(sim, speed: float, paused: bool) -> Scene:
-    """The scene of sim at sim.now."""
+def _fmt(value, spec: str) -> str:
+    return "-" if value is None else format(value, spec)
+
+
+def build_scene(sim, speed: float, paused: bool, warmup: float | None = None) -> Scene:
+    """The scene of sim at sim.now. With warmup, two more HUD lines: the KPIs of [warmup, now] once the warm-up is
+    over (DAIM's rule, research §F), else the time left in it."""
     t = sim.now
     cycling = {vid for group in wait_cycles(sim.executor.blocked_by()) for vid in group}
     vehicles = []
@@ -51,4 +56,12 @@ def build_scene(sim, speed: float, paused: bool) -> Scene:
     hud = (f"t {t:9.1f} s  x{speed:g}{'  paused' if paused else ''}",
            f"done {done} waiting {len(sim.mcs.waiting())} cycles {len(sim.wait_cycles)}"
            f"{'  FROZEN' if sim.stopped else ''}")
+    if warmup is not None:
+        if t < warmup:
+            hud += (f"warm-up: {warmup - t:.0f} s left", "")
+        else:
+            k = sim.kpi(warmup, t)
+            hud += (f"KPI {warmup:g}-{t:.0f} s: throughput {_fmt(k['throughput_per_h'], '.1f')}/h  "
+                    f"utilization {_fmt(k['utilization'], '.2f')}",
+                    f"cycle {_fmt(k['cycle_s'], '.1f')} s  delivery {_fmt(k['deliver_s'], '.1f')} s  done {k['completed']}")
     return Scene(t, tuple(vehicles), ports, hud)
