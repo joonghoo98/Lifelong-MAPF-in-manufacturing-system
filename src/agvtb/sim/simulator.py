@@ -2,7 +2,8 @@
 
 The flow is DAIM's safe-tail loop (research §A): at each dispatch the pending vehicles are planned from the end of
 their committed paths, after the done prefixes are pruned and the TAPG is re-timed from now; a plan is checked,
-appended to the TAPG, its siding moves in the ledger, and the vehicle is told to go on. There are no periodic
+appended to the TAPG, passes commit gate B (a cycle of the execution event graph that it makes takes it off for
+the fallback plan), its siding moves in the ledger, and the vehicle is told to go on. There are no periodic
 timers and no timed retries (user decision S6): a failed plan stays pending until the next dispatch. Wait cycles
 are only detected and recorded (S3). Every run of the same input writes the same event log, whatever dt is.
 """
@@ -23,6 +24,7 @@ from agvtb.sim.executor import Executor, wait_cycles, world_geometry
 from agvtb.sim.jobs import Job, Mcs
 from agvtb.sim.kernel import MCS, Kernel
 from agvtb.sim.tapg import Tapg
+from agvtb.validate.events import event_graph, first_cycle
 from agvtb.validate.plans import (early_fallback, live_entries, pairwise_overlaps, path_vs_entries, tail_violations,
                                   task_order_violation, unprotected)
 from agvtb.world.loader import LoadedWorld
@@ -147,8 +149,12 @@ class Simulation:
         self.span: dict[int, tuple[int, int, int]] = {}  # vid -> (job id, lo, hi) of its committed task
         self.commits: list[Commit] = []
         self.checks: dict[str, list] = {k: [] for k in ("plan_overlaps", "order", "early_fallbacks", "tails",
-                                                        "unprotected", "event_cycles", "executed_overlaps")}
-        self.counts = {"plan_fail": 0, "inline_miss": 0, "event_cycles": 0, "commits": 0, "unplanned_delivery": 0}
+                                                        "unprotected", "event_cycles", "commit_gate", "tapg_cycles",
+                                                        "executed_overlaps")}
+        self.counts = {"plan_fail": 0, "inline_miss": 0, "event_cycles": 0, "commits": 0, "unplanned_delivery": 0,
+                       "tapg_cycles": 0, "event_forever_edges_max": 0, "commit_gate_checks": 0,
+                       "commit_gate_rejected": 0, "commit_gate_preexisting_cycle": 0, "commit_gate_fallback_fail": 0,
+                       "commit_gate_fallback_cycle": 0, "commit_gate_revoke_refused": 0}
         self.cycles_seen: set[tuple[int, ...]] = set()
         self.wait_cycles: list[tuple[float, tuple[int, ...]]] = []
         self.last_completion = 0.0
@@ -273,11 +279,13 @@ class Simulation:
         self.executor.wake_ready(t)
         tasks = sorted((self.dispatch_t.get(vid, t), vid) for vid in self.pending)
         cons = live_constraints(self.tapg, self.executor, t)
+        n0 = self.counts["commits"]
         for _dt, vid in tasks:
             legs = self.pending[vid]
             path = self.tapg.paths[vid]
             start_sid, start_t = path[-1]
-            res = self.planner.plan_task(start_sid, start_t, legs, _table(cons, vid), self.ledger.candidates(vid),
+            table = _table(cons, vid)
+            res = self.planner.plan_task(start_sid, start_t, legs, table, self.ledger.candidates(vid),
                                          self.ledger.home(vid))
             if res is None:
                 self.counts["plan_fail"] += 1
@@ -287,9 +295,15 @@ class Simulation:
             old_len = len(path)
             moving = self.executor.vehicles[vid].state != "DONE"
             self.tapg.append(vid, res.path)
-            if self.tapg.has_cycle():
-                self.counts["event_cycles"] += 1
-                self.checks["event_cycles"].append({"t": t, "vid": vid})
+            self.executor.kick(vid, t)  # DAIM's append wakes a finished vehicle (env:1664-1670); the gate may revoke
+            res = self._commit_gate(t, vid, res, legs, table, old_len)
+            if res is None:  # revoked and no fallback: pending, like a failed plan (DAIM vis:5452-5455)
+                self.counts["plan_fail"] += 1
+                self._log(t, "plan_fail", vid, tuple(legs))
+                continue
+            if self.tapg.has_cycle():  # the node graph itself: recompute stops re-timing on a cycle
+                self.counts["tapg_cycles"] += 1
+                self.checks["tapg_cycles"].append({"t": t, "vid": vid})
             self.ledger.transfer(vid, res.siding)
             i_l = next(i for i, (sid, _) in enumerate(res.path) if sid.startswith("L,")
                        and self.graph[sid].nodes[0] == legs[0])
@@ -300,14 +314,64 @@ class Simulation:
             self.span[vid] = (job.jid, old_len, old_len + len(res.path) - 1)
             cons[vid] = [c for c in cons[vid] if c[2] != INF] + path_constraints(res.path, self.graph, self.conflicts)
             self._check_tapg(t, vid, old_len)
-            self.executor.kick(vid, t)
             self.commits.append(Commit(t, vid, tuple(legs), start_sid, start_t, moving, res.fallback))
             self.counts["commits"] += 1
             self._log(t, "commit", vid, (tuple(legs), res.siding, res.fallback))
             del self.pending[vid]
             self.dispatch_t.pop(vid, None)
             self._check_arrival(vid, t)
+        if self.counts["commits"] > n0:
+            self._post_check(t)
         self._find_cycles(t)
+
+    def _commit_gate(self, t: float, vid: int, res, legs, table, old_len: int):
+        """Commit gate B (DAIM vis:5499-5530, spec §6.2): the plan is on the TAPG; if the execution event graph
+        now has a cycle, take the new segment off and look again. Gone: this commit made it, so the fallback
+        (T* then in-edges only) goes on instead. Still there: an older cycle, the plan goes back on (a finding).
+        Returns the plan that is on the TAPG, None if it was taken off and there is no fallback."""
+        self.counts["commit_gate_checks"] += 1
+        cyc, _ = self._event_cycle()
+        if cyc is None:
+            return res
+        if not self.executor.revocable(vid, old_len):
+            self.counts["commit_gate_revoke_refused"] += 1
+            self.checks["commit_gate"].append({"t": t, "vid": vid, "why": "revoke_refused", "cycle": cyc[:8]})
+            return res
+        self.executor.wake(self.tapg.revoke_beyond(vid, old_len), t)
+        cyc, _ = self._event_cycle()
+        if cyc is not None:
+            self.counts["commit_gate_preexisting_cycle"] += 1
+            self.checks["commit_gate"].append({"t": t, "vid": vid, "why": "preexisting", "cycle": cyc[:8]})
+            self.tapg.append(vid, res.path)
+            return res
+        self.counts["commit_gate_rejected"] += 1
+        self._log(t, "commit_gate_rejected", vid, tuple(legs))
+        fb = self.planner.fallback(res.path[0][0], res.path[0][1], legs, table, self.ledger.home(vid))
+        if fb is None:
+            self.counts["commit_gate_fallback_fail"] += 1
+            return None
+        self._check_plan(t, vid, fb, legs)  # DAIM ledger m-1: the replacing fallback is checked too
+        self.tapg.append(vid, fb.path)
+        cyc, _ = self._event_cycle()
+        if cyc is not None:
+            self.counts["commit_gate_fallback_cycle"] += 1
+            self.checks["commit_gate"].append({"t": t, "vid": vid, "why": "fallback", "cycle": cyc[:8]})
+        return fb
+
+    def _event_cycle(self) -> tuple[list | None, int]:
+        """(a cycle of the TAPG's execution event graph or None, the graph's number of permanent blocks)."""
+        claims = {vid: v.claim_idx for vid, v in self.executor.vehicles.items()}
+        graph, forever = event_graph(self.tapg.paths, claims, self.tapg, self.tapg.cross_edges())
+        return first_cycle(graph), forever
+
+    def _post_check(self, t: float) -> None:
+        """Once after a replan's commits, on what goes on to execution (DAIM _st_check_post vis:5639-5649, user
+        decision): the event-graph cycles and the most permanent blocks seen. Writes no event."""
+        cyc, forever = self._event_cycle()
+        self.counts["event_forever_edges_max"] = max(self.counts["event_forever_edges_max"], forever)
+        if cyc is not None:
+            self.counts["event_cycles"] += 1
+            self.checks["event_cycles"].append({"t": t, "cycle": cyc[:8]})
 
     def _check_plan(self, t: float, vid: int, res, legs) -> None:
         others = {u: live_entries(self.tapg.paths[u], self.executor.vehicles[u].path_idx, self.executor.vehicles[u].claim_idx,
