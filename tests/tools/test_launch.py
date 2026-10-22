@@ -1,0 +1,35 @@
+from agvtb.tools.launch import build_argv, main, runnable_configs
+from helpers import CONFIGS, REPO
+
+
+def feed(*answers):
+    it = iter(answers)
+    return lambda prompt: next(it)
+
+
+def test_runnable_configs_are_the_maps_with_a_siding_variant():
+    names = [p.stem for p in runnable_configs(CONFIGS)]
+    assert names == ["grid_songdo_manual", "KAIROS_AMR", "mini_deadend", "random_32_32_20", "songdo_grid_bi"]
+
+
+def test_blank_answers_take_the_defaults():
+    argv = build_argv(feed("", "", "", "", ""), lambda *a: None, CONFIGS)
+    assert argv == [str(CONFIGS / "mini_deadend.json"), "--vehicles", "8", "--rate", "2", "--seed", "0", "--speed", "10"]
+
+
+def test_bad_answers_are_asked_again():
+    shown = []
+    argv = build_argv(feed("9", "2", "0", "x", "4", "-1", "1.5", "s", "3", "7", "30"), shown.append, CONFIGS)
+    assert argv == [str(CONFIGS / "KAIROS_AMR.json"), "--vehicles", "4", "--rate", "1.5", "--seed", "3", "--speed", "30"]
+    assert sum("try again" in line for line in shown) == 6
+
+
+def test_main_runs_the_viewer_with_the_answers():
+    got = []
+    assert main(input_fn=feed("", "", "", "", ""), run=lambda argv: got.append(argv) or 0, root=CONFIGS) == 0
+    assert got[0][1:3] == ["--vehicles", "8"]
+
+
+def test_the_bat_file_runs_the_launcher_from_its_own_folder():
+    text = (REPO / "view_sim.bat").read_text(encoding="ascii")
+    assert 'cd /d "%~dp0"' in text and '".venv\\Scripts\\python.exe" -m agvtb.tools.launch' in text
