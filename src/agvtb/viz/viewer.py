@@ -20,6 +20,8 @@ KIND_COLOR = {"move": (40, 170, 60), "rotate": (0, 160, 170), "blocked": (210, 4
               "rest": (130, 130, 130)}
 BACK, EDGE, NODE, PORT, SIDING, TEXT = (250, 250, 250), (205, 205, 205), (170, 170, 170), (30, 70, 200), \
     (130, 90, 170), (20, 20, 20)
+CYCLE_COLOR = (230, 0, 230)  # vehicles in a wait cycle: a colour no state uses
+MIN_BODY_PX = 8  # a vehicle is drawn at least this big, so its colour shows on big maps
 KEYS_UP = (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS)  # '+' on a Korean or US keyboard is K_EQUALS
 KEYS_DOWN = (pygame.K_MINUS, pygame.K_KP_MINUS)
 KEYS_STEP = (pygame.K_PERIOD, pygame.K_KP_PERIOD)
@@ -76,8 +78,8 @@ class Viewer:
     # --- drawing -----------------------------------------------------------------------------------------------
     def _vehicle_polygon(self, x: float, y: float, heading: float) -> list[tuple[float, float]]:
         fp = self.sim.world.footprint
-        half_l = max(fp.length_m * self.scale, 4) / 2
-        half_w = max(fp.width_m * self.scale, 4) / 2
+        half_l = max(fp.length_m * self.scale, MIN_BODY_PX) / 2
+        half_w = max(fp.width_m * self.scale, MIN_BODY_PX) / 2
         cx, cy = self.to_screen(x, y)
         a = math.radians(heading)
         ux, uy = math.cos(a), -math.sin(a)  # screen y grows downwards
@@ -94,7 +96,7 @@ class Viewer:
         for v in scene.vehicles:
             poly = self._vehicle_polygon(v.x, v.y, v.heading_deg)
             pygame.draw.polygon(self.screen, KIND_COLOR[v.kind], poly)
-            pygame.draw.polygon(self.screen, (210, 0, 0) if v.in_cycle else TEXT, poly, 3 if v.in_cycle else 1)
+            pygame.draw.polygon(self.screen, CYCLE_COLOR if v.in_cycle else TEXT, poly, 3 if v.in_cycle else 1)
             front = ((poly[0][0] + poly[1][0]) / 2, (poly[0][1] + poly[1][1]) / 2)
             pygame.draw.line(self.screen, TEXT, self.to_screen(v.x, v.y), front, 2)
             self.screen.blit(self.font.render(f"{v.vid}{v.phase}", True, TEXT), (poly[0][0] + 2, poly[0][1] - 12))

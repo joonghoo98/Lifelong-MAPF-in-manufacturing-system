@@ -8,6 +8,7 @@ returns 0; 2 is a usage error and 3 a gate refusal, as in run_sim.
 """
 import argparse
 import math
+import os
 from pathlib import Path
 
 from agvtb.planning.gate import GateError
@@ -63,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--at must be finite and >= 0, got {args.at}")
     if args.screenshot is not None and not Path(args.screenshot).parent.is_dir():
         parser.error(f"--screenshot: no folder {Path(args.screenshot).parent}")
+    if args.screenshot is not None and Path(args.screenshot).is_dir():
+        parser.error(f"--screenshot: {args.screenshot} is a folder, not a file")
+    if args.screenshot is None and os.environ.get("SDL_VIDEODRIVER", "").lower() == "dummy":
+        parser.error("SDL_VIDEODRIVER=dummy shows no window: a live run could not be seen or closed; use --screenshot")
     try:
         from agvtb.viz.viewer import Viewer
     except ModuleNotFoundError:

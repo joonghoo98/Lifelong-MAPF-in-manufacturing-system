@@ -75,3 +75,32 @@ def test_cli_usage_errors(extra):
     with pytest.raises(SystemExit) as exc:
         main([str(CONFIGS / "mini_deadend.json")] + extra)
     assert exc.value.code == 2
+
+
+def test_a_vehicle_in_a_wait_cycle_stands_out_from_a_blocked_one():  # final review I1
+    from agvtb.viz.scene import Scene, VehicleView
+    from agvtb.viz.viewer import CYCLE_COLOR, KIND_COLOR
+
+    v = Viewer(make())
+    x, y = v.sim.world.nodes[v.sim.sidings[0]]
+    v._draw(Scene(0.0, (VehicleView(0, x, y, 0.0, "blocked", "I", True),), (), ()))
+    poly = v._vehicle_polygon(x, y, 0.0)
+    mid = (round((poly[1][0] + poly[2][0]) / 2), round((poly[1][1] + poly[2][1]) / 2))  # middle of the right side
+    assert CYCLE_COLOR != KIND_COLOR["blocked"] and tuple(v.screen.get_at(mid))[:3] == CYCLE_COLOR
+
+
+def test_vehicles_are_at_least_eight_pixels_on_a_big_map():  # final review M4 (re-graded Important)
+    v = Viewer(make(), size=(200, 200))
+    poly = v._vehicle_polygon(0.0, 0.0, 0.0)
+    side = ((poly[0][0] - poly[1][0]) ** 2 + (poly[0][1] - poly[1][1]) ** 2) ** 0.5
+    assert side >= 8.0
+
+
+def test_cli_refuses_a_folder_as_screenshot_and_a_live_run_without_a_display(tmp_path):  # final review M1, M2
+    base = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "2", "--rate", "1"]
+    with pytest.raises(SystemExit) as exc:
+        main(base + ["--screenshot", str(tmp_path), "--at", "10"])
+    assert exc.value.code == 2
+    with pytest.raises(SystemExit) as exc:
+        main(base)  # this module runs with SDL_VIDEODRIVER=dummy: a live window could never be seen or closed
+    assert exc.value.code == 2
