@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from agvtb.sim.kernel import AGV, Kernel
-from agvtb.sim.motion import plan_move
+from agvtb.sim.motion import MovePlan, plan_move
 from agvtb.sim.tapg import Key, Tapg
 from agvtb.world.model import World
 from agvtb.world.states import StateGraph
@@ -47,6 +47,7 @@ class Vehicle:
     dur: float = 0.0  # its duration as now committed
     move: tuple[float, float, float] = (0.0, 0.0, 0.0)  # v0, vmax, length of the move
     v_end: float = 0.0
+    profile: MovePlan | None = None  # the move's profile as now committed (stop, then the braking decision's)
     load_tok: int = 0
     load_end: float | None = None
     load_sid: str | None = None
@@ -231,7 +232,7 @@ class Executor:
         v.node, v.state, v.dwelling = self.tapg.key(v.vid, v.path_idx), "MOVING", False
         v.move, v.t0 = (v.v, vmax, length), t
         prof = plan_move(v.v, vmax, self.accel, self.decel, length, stop=True)
-        v.dur, v.v_end = prof.duration_s, prof.v_end
+        v.dur, v.v_end, v.profile = prof.duration_s, prof.v_end, prof
         self.on_event(t, "move", v.vid, (sid,))
         if prof.brake_s <= 1e-9:
             self._brake_decision(v)
@@ -247,7 +248,7 @@ class Executor:
         through = self._next_move_claimable(v)
         v0, vmax, length = v.move
         prof = plan_move(v0, vmax, self.accel, self.decel, length, stop=not through)
-        v.dur, v.v_end = prof.duration_s, prof.v_end
+        v.dur, v.v_end, v.profile = prof.duration_s, prof.v_end, prof
         self.kernel.schedule(v.t0 + v.dur, AGV, self._arrive, v.vid, v.t0)
 
     def _next_move_claimable(self, v: Vehicle) -> bool:
