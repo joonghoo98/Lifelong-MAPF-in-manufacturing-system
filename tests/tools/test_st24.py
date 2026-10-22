@@ -80,3 +80,24 @@ def test_a_result_of_another_condition_is_refused(tmp_path, wrong):  # the run i
     (res / "dflpbr_s5_l1.5.json").write_text(json.dumps(fake_result(seed=5, lam=1.5) | wrong), encoding="utf-8")
     with pytest.raises(AssertionError):
         compare_table(st, res)
+
+
+def test_the_table_shows_the_commit_gate_on_both_sides(tmp_path):  # M5b
+    st = fake_st24(tmp_path, ["dflpbr_s5_l1.5", "rand_s2_l2.5"])
+    rec = json.loads((st / "st24_rand_s2_l2.5.json").read_text(encoding="utf-8"))
+    rec["result"]["rule_stats"] |= {"safe_tail_gate_rejected": 2, "safe_tail_gate_preexisting_cycle": 1,
+                                   "safe_tail_gate_fallback_fail": 1, "safe_tail_event_forever_edges_max": 0}
+    (st / "st24_rand_s2_l2.5.json").write_text(json.dumps(rec), encoding="utf-8")
+    res = tmp_path / "res"
+    res.mkdir()
+    (res / "dflpbr_s5_l1.5.json").write_text(json.dumps(fake_result(seed=5, lam=1.5)), encoding="utf-8")  # before B
+    ours = fake_result(seed=2, lam=2.5) | {"config": "configs/maps/daim/grid_songdo_rand.json",
+                                           "fromto": "x/grid_songdo_rand_fromto_AGV.csv"}
+    ours["stats"] |= {"commit_gate_checks": 2190, "commit_gate_rejected": 1, "commit_gate_preexisting_cycle": 0,
+                      "commit_gate_fallback_fail": 0, "commit_gate_fallback_cycle": 0, "commit_gate_revoke_refused": 0,
+                      "event_forever_edges_max": 0}
+    (res / "rand_s2_l2.5.json").write_text(json.dumps(ours), encoding="utf-8")
+    lines = compare_table(st, res).splitlines()
+    row = {n: next(x for x in lines if x.startswith(f"| {n} |")) for n in ("dflpbr_s5_l1.5", "rand_s2_l2.5")}
+    assert "| 0/0 | -/0+0 | -/- |" in row["dflpbr_s5_l1.5"]
+    assert "| 0/1 | 1+0/2+1 | 0/0 |" in row["rand_s2_l2.5"]  # the gate's fallback failure: in plan fail, not in bug

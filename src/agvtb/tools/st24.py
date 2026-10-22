@@ -63,7 +63,11 @@ def daim_record(st24_dir: Path, name: str, summary_row: dict) -> dict:
     return {"t_end": r["t_end"], "frozen": r.get("frozen_at_s") or ("stopped early" if r.get("stopped_early") else None),
             "partial": v["jobs_over_30min"] + v["held_over_30min"], "job_max": v["job_assign_to_done_max_s"],
             "cycles": st("exec_cycles"), "event_cycles": st("event_cycles"), "findings": st("validator_violations"),
-            "plan_fail": st("fallback_fail"), "sidings": rs.get("safe_tail_sidings"),
+            # plan_task's failures and the commit gate's (vis:5522), as ours count both (user decision, M5b)
+            "plan_fail": st("fallback_fail") + st("gate_fallback_fail"), "sidings": rs.get("safe_tail_sidings"),
+            "gate": (st("gate_rejected"),
+                     st("gate_preexisting_cycle") + st("gate_revoke_refused") + st("gate_fallback_cycle")),
+            "forever": rs.get("safe_tail_event_forever_edges_max"),
             "aisle": (rs.get("safe_tail_map") or {}).get("aisle_size"), "thr_h": win["throughput_min"] * 60, "cycle": win["avg_cycle_s"],
             "deliver": win["avg_deliver_s"], "util": win["utilization_agv"], "completed": win["completed"],
             "created": kall["completed"] + kall["waiting_loads"] + kall["active_loads"], "wall": v["wall_s"]}
@@ -83,6 +87,9 @@ def our_record(result: dict, name: str) -> dict:
             "partial": d["partial_jobs"] + d["held_at_end"], "job_max": result["job_max_s"],
             "cycles": len(d["wait_cycles"]), "event_cycles": s.get("event_cycles", 0),
             "findings": sum(len(x) for x in result["checks"].values()), "plan_fail": s.get("plan_fail", 0),
+            "gate": (s["commit_gate_rejected"], s["commit_gate_preexisting_cycle"] + s["commit_gate_revoke_refused"]
+                     + s["commit_gate_fallback_cycle"]) if "commit_gate_checks" in s else None,  # None: a run before B
+            "forever": s.get("event_forever_edges_max"),
             "thr_h": k["throughput_per_h"], "cycle": k["cycle_s"], "deliver": k["deliver_s"], "util": k["utilization"],
             "completed": k["completed"], "created": result["jobs_created"], "wall": result["wall_s"],
             "sha": result["events_sha256"], "sidings": result["gate"]["condition_m"]["sidings"],
@@ -93,13 +100,20 @@ def _f(value, fmt="{:.1f}"):
     return "-" if value is None else fmt.format(value)
 
 
+def _gate(g):
+    """Commit gate B: rejected commits + its bug signals (pre-existing cycle, revoke refused, cycle after the
+    fallback)."""
+    return "-" if g is None else f"{g[0]}+{g[1]}"
+
+
 def compare_table(st24_dir: Path, results_dir: Path) -> str:
     """Markdown: "pass k/n (N conditions, m not run)" over the conditions that have a result, then one row per
     condition, ours/DAIM side by side."""
     head = ("| condition | pass | end s | frozen | partial ours/DAIM | longest job s ours/DAIM | cycles ours/DAIM | "
-            "findings ours/DAIM | plan fail ours/DAIM | throughput/h ours/DAIM | cycle s ours/DAIM | "
+            "findings ours/DAIM | plan fail ours/DAIM | B gate rejected+bug ours/DAIM | forever edges ours/DAIM | "
+            "throughput/h ours/DAIM | cycle s ours/DAIM | "
             "deliver s ours/DAIM | utilization ours/DAIM | sha |")
-    rows, n_run, n_pass, summary = [head, "|" + "---|" * 14], 0, 0, _summary(st24_dir)
+    rows, n_run, n_pass, summary = [head, "|" + "---|" * 16], 0, 0, _summary(st24_dir)
     for name, row in summary.items():
         dm = daim_record(st24_dir, name, row)
         try:  # a missing or half-written result is a run not done (final review I3)
@@ -109,6 +123,7 @@ def compare_table(st24_dir: Path, results_dir: Path) -> str:
         if result is None:
             rows.append(f"| {name} | not run | | | -/{dm['partial']} | -/{_f(dm['job_max'])} | "
                         f"-/{dm['cycles']}+{dm['event_cycles']} | -/{dm['findings']} | -/{dm['plan_fail']} | "
+                        f"-/{_gate(dm['gate'])} | -/{_f(dm['forever'], '{}')} | "
                         f"-/{_f(dm['thr_h'])} | -/{_f(dm['cycle'])} | -/{_f(dm['deliver'])} | "
                         f"-/{_f(dm['util'], '{:.3f}')} | |")
             continue
@@ -119,6 +134,7 @@ def compare_table(st24_dir: Path, results_dir: Path) -> str:
                     f"{o['partial']}/{dm['partial']} | {_f(o['job_max'])}/{_f(dm['job_max'])} | "
                     f"{o['cycles']}+{o['event_cycles']}/{dm['cycles']}+{dm['event_cycles']} | "
                     f"{o['findings']}/{dm['findings']} | {o['plan_fail']}/{dm['plan_fail']} | "
+                    f"{_gate(o['gate'])}/{_gate(dm['gate'])} | {_f(o['forever'], '{}')}/{_f(dm['forever'], '{}')} | "
                     f"{_f(o['thr_h'])}/{_f(dm['thr_h'])} | {_f(o['cycle'])}/{_f(dm['cycle'])} | "
                     f"{_f(o['deliver'])}/{_f(dm['deliver'])} | {_f(o['util'], '{:.3f}')}/{_f(dm['util'], '{:.3f}')} | "
                     f"`{o['sha'][:12]}` |")
