@@ -37,12 +37,16 @@ def test_out_json_has_the_values_the_st24_comparison_needs(tmp_path):  # M4c
     from agvtb.world.loader import load_world
 
     out = tmp_path / "r.json"
-    argv = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--warmup", "0", "--measure", "900",
+    # the warm-up ends after the run's longest job (113.9 s, done at 840.3 s): job_max_s must count warm-up jobs too,
+    # as st24 does (final review)
+    argv = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--warmup", "841", "--measure", "59",
             "--out", str(out)]
     assert main(argv) == 0
     data = json.loads(out.read_text(encoding="utf-8"))
     lw = load_world(CONFIGS / "mini_deadend.json")
     cands = candidates_of(lw, parse_siding_choice(load_map_config(CONFIGS / "mini_deadend.json").sidings))
-    r = simulate(lw, cands, SimConfig(4, 2.0, 0, 0.0, 900.0, 0.5))
-    done = [j.t_completed - j.t_assigned for j in r.jobs if j.t_completed is not None]
-    assert data["job_max_s"] == max(done) and data["jobs_created"] == len(r.jobs) and data["wall_s"] > 0
+    r = simulate(lw, cands, SimConfig(4, 2.0, 0, 841.0, 59.0, 0.5))
+    longest = max((j for j in r.jobs if j.t_completed is not None), key=lambda j: j.t_completed - j.t_assigned)
+    assert longest.t_completed < 841.0  # so a window-only maximum would differ
+    assert data["job_max_s"] == longest.t_completed - longest.t_assigned
+    assert data["jobs_created"] == len(r.jobs) and data["wall_s"] > 0
