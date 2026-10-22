@@ -82,6 +82,11 @@ class Executor:
             v.path_idx = max(0, v.path_idx - 1)
             self.kernel.schedule(t, AGV, self._try_advance, vid)
 
+    def revocable(self, vid: int, k: int) -> bool:
+        """The states from index k on are neither entered nor claimed, so they may be taken back (env:1561-1565)."""
+        v = self.vehicles[vid]
+        return k > v.path_idx and k >= v.claim_idx
+
     def shift(self, vid: int, n: int) -> None:
         """After tapg.prune(vid, n): the indices move back by n."""
         v = self.vehicles[vid]

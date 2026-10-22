@@ -171,6 +171,29 @@ class Tapg:
         self.paths[vid] = self.paths[vid][upto:]
         return sorted(waiters)
 
+    def revoke_beyond(self, vid: int, k: int) -> list[int]:
+        """Take back vid's states from index k on (env:1547-1600): their nodes leave and the path is cut to [:k] in
+        place. The new last state lasts forever and loses its edges to other vehicles: a parked last stop is never an
+        edge source, else its waiters wait forever (env:1584-1597). The vehicles to wake, sorted; [] if nothing
+        lies beyond k. Whether the vehicle has entered or claimed those states is the executor's to say."""
+        if k < 1:
+            raise ValueError(f"vehicle {vid}: revoking from {k} would leave no state")
+        path = self.paths[vid]
+        if k >= len(path):
+            return []
+        waiters: set[int] = set()
+        for i in range(k, len(path)):
+            waiters.update(self.remove(self.key(vid, i)))
+        del path[k:]
+        last = self.key(vid, k - 1)
+        if last in self.duration:
+            self.duration[last] = INF
+            for s in [s for s in self._succ[last] if s[1] != vid]:
+                self._succ[last].discard(s)
+                self._pred[s].discard(last)
+                waiters.add(s[1])
+        return sorted(waiters)
+
     def mark_dwell(self, vid: int, i: int) -> None:
         """The stop before a load keeps its length through recompute (research §A6-3)."""
         key = self.key(vid, i)

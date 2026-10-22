@@ -90,3 +90,15 @@ def test_append_must_continue_the_path():
     g.add_vehicle(1, "S,c10,0", 0.0)
     with pytest.raises(ValueError, match="S,c20,0"):
         g.append(1, [("S,c20,0", 0.0), ("M,c20,c21", 0.0), ("S,c21,0", 2.0)])
+
+
+def test_revoke_beyond_drops_the_new_states_and_the_new_tails_cross_edges():  # DAIM env:1569-1600
+    p1 = [("S,c10,0", 0.0), ("M,c10,c11", 0.0), ("S,c11,0", 2.0), ("M,c11,c12", 2.0), ("S,c12,0", 4.0)]
+    p2 = [("S,c20,0", 0.0), ("M,c20,c10", 1.0), ("S,c10,0", 3.0)]
+    g = two(p1, p2)  # three cross edges, as test_an_s_target_also_gets_an_edge_to_the_move_before_it
+    assert g.revoke_beyond(1, 1) == [2]
+    assert g.paths[1] == [("S,c10,0", 0.0)] and g.duration[("S,c10,0", 1, 0.0)] == float("inf")
+    assert g.cross_edges() == [] and set(g.duration) == {g.key(1, 0)} | {g.key(2, i) for i in range(3)}
+    assert g.revoke_beyond(1, 5) == [] and g.paths[1] == [("S,c10,0", 0.0)]
+    with pytest.raises(ValueError):
+        g.revoke_beyond(1, 0)

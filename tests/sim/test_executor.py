@@ -95,3 +95,10 @@ def test_two_recomputes_during_one_move_keep_its_real_end():  # final review I1,
 def test_wait_cycles_follow_every_blocker():  # final review I2
     assert wait_cycles({1: {2, 3}, 3: {1}}) == [(1, 3)]
     assert wait_cycles({1: {2}, 2: {1, 3}, 3: {4}, 4: {3}}) == [(1, 2), (3, 4)]
+
+
+def test_revocable_only_beyond_the_entered_and_claimed_states():  # DAIM env:1561-1565
+    ex, _ = run({1: [("S,c00,0", 0.0), ("M,c00,c10", 0.0), ("S,c10,0", 2.0)]})
+    v = ex.vehicles[1]
+    v.path_idx, v.claim_idx = 2, 4
+    assert [ex.revocable(1, k) for k in (2, 3, 4, 5)] == [False, False, True, True]
