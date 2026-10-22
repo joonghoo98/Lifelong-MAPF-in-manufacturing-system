@@ -111,6 +111,16 @@ def press(*keys):
         pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
 
 
+def fast_frames(v):
+    """Draw frames until the fast run is over (a frame computes about FAST_FRAME_S of wall time)."""
+    v.run(max_frames=1, clock=ticking(1.0))
+    for _ in range(1000):
+        if v.fast_target is None:
+            return
+        v.run(max_frames=1, clock=ticking(1.0))
+    raise AssertionError("the fast run did not end")
+
+
 def test_settings_are_typed_in():  # user 2026-10-22: number entry for speed, warm-up and sim time
     v = Viewer(make())
     press(pygame.K_s, pygame.K_2, pygame.K_5, pygame.K_RETURN, pygame.K_w, pygame.K_6, pygame.K_0, pygame.K_0,
@@ -129,7 +139,7 @@ def test_a_bad_or_cancelled_entry_keeps_the_old_value():
 def test_fast_mode_runs_to_warm_up_plus_sim_time_then_goes_on_at_speed():  # user 2026-10-22
     v = Viewer(make(math.inf), speed=10.0, warmup=60.0, sim_time=240.0)
     press(pygame.K_f)
-    v.run(max_frames=1, clock=ticking(1.0))
+    fast_frames(v)
     assert v.sim.now == 300.0 and v.fast_target is None
     v.run(max_frames=3, clock=ticking(1.0))
     assert v.sim.now == 320.0  # the run does not end there: it goes on at x10
@@ -138,7 +148,7 @@ def test_fast_mode_runs_to_warm_up_plus_sim_time_then_goes_on_at_speed():  # use
 def test_fast_mode_does_not_change_the_events():
     v = Viewer(make(math.inf), warmup=0.0, sim_time=600.0)
     press(pygame.K_f)
-    v.run(max_frames=1, clock=ticking(1.0))
+    fast_frames(v)
     other = make(math.inf)
     other.advance_to(600.0)
     assert v.sim.result().events_sha256 == other.result().events_sha256
@@ -154,3 +164,57 @@ def test_kpi_lines_after_the_warm_up():  # user 2026-10-22: KPI of [warm-up end,
     lines = build_scene(sim, 10.0, False, warmup=100.0).hud
     assert f"throughput {k['throughput_per_h']:.1f}/h  utilization {k['utilization']:.2f}" in lines[2]
     assert f"cycle {k['cycle_s']:.1f} s  delivery {k['deliver_s']:.1f} s  done {k['completed']}" in lines[3]
+
+
+def costly(sim, per_sim_s=0.01, tick=0.001):
+    """A clock whose wall time also grows with the simulated time computed: computing costs time."""
+    calls = [0]
+
+    def clock():
+        calls[0] += 1
+        return calls[0] * tick + sim.now * per_sim_s
+    return clock
+
+
+def test_no_jump_after_a_fast_run():  # final review I1
+    v = Viewer(make(math.inf), speed=10.0, warmup=0.0, sim_time=300.0)
+    seen = []
+    v.draw = lambda *a: seen.append(v.sim.now)
+    press(pygame.K_f)
+    v.run(max_frames=60, clock=costly(v.sim))
+    i = seen.index(300.0)
+    assert seen[i + 1] - 300.0 < 1.0  # the compute time of the fast run is not paced afterwards
+
+
+def test_a_fast_run_keeps_the_window_answering():  # final review I2
+    v = Viewer(make(math.inf), warmup=0.0, sim_time=3600.0)
+    press(pygame.K_f)
+    v.run(max_frames=1, clock=costly(v.sim))
+    assert 0.0 < v.sim.now <= 20.0 and v.fast_target == 3600.0  # a frame computes about 0.1 s, then draws
+
+
+def test_space_pauses_a_fast_run_and_f_again_stops_it():  # final review minor, re-graded Important
+    v = Viewer(make(math.inf), warmup=0.0, sim_time=3600.0)
+    press(pygame.K_SPACE, pygame.K_f)  # F while paused starts the fast run
+    v.run(max_frames=1, clock=costly(v.sim))
+    t = v.sim.now
+    assert t > 0.0 and not v.paused
+    press(pygame.K_SPACE)
+    v.run(max_frames=3, clock=costly(v.sim))
+    assert v.sim.now == t and v.fast_target == 3600.0
+    press(pygame.K_SPACE, pygame.K_f)
+    v.run(max_frames=1, clock=costly(v.sim))
+    assert v.fast_target is None and not v.paused
+
+
+def test_the_window_closes_before_the_summary_is_computed(tmp_path, monkeypatch):  # final review I3
+    seen = []
+    original = Simulation.result
+
+    def spy(self, *args, **kwargs):
+        seen.append(pygame.display.get_init())
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(Simulation, "result", spy)
+    argv = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--screenshot",
+            str(tmp_path / "shot.png"), "--at", "60"]
+    assert main(argv) == 0 and seen == [False]

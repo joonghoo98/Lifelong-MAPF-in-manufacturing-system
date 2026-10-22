@@ -350,14 +350,16 @@ class Simulation:
         if not self.kernel.stopped and self.kernel.now < self.end:
             self.kernel.run_until(min(t, self.end), self.cfg.dt)
 
-    def result(self) -> SimResult:
-        """The result of the run up to now."""
+    def result(self, warmup: float | None = None) -> SimResult:
+        """The result of the run up to now; KPIs and partial deadlocks count from warmup (default: the config's,
+        the viewer passes the one set in its window)."""
+        w0 = self.cfg.warmup_s if warmup is None else warmup
         t_end = self.kernel.now
         timelines = {vid: v.executed for vid, v in self.executor.vehicles.items()}
         self.checks["executed_overlaps"] = pairwise_overlaps(timelines, self.conflicts)
         stats = dict(sorted(self.planner.stats.items())) | self.counts | {"stray_arrivals": self.mcs.stray_arrivals}
         blob = json.dumps(self.events, separators=(",", ":")).encode()
-        return SimResult(self.gate, self.kpi(self.cfg.warmup_s, t_end), self._deadlock(t_end), self.checks, stats,
+        return SimResult(self.gate, self.kpi(w0, t_end), self._deadlock(t_end, w0), self.checks, stats,
                          hashlib.sha256(blob).hexdigest(), len(self.events), t_end, self.mcs.jobs, self.commits)
 
     def kpi(self, w0: float, t: float) -> dict:
@@ -387,8 +389,7 @@ class Simulation:
             "backlog_end": len(self.mcs.waiting()) + len(self.mcs.held),
         }
 
-    def _deadlock(self, t_end: float) -> dict:
-        w0 = self.cfg.warmup_s
+    def _deadlock(self, t_end: float, w0: float) -> dict:
         partial = sum(1 for j in self.mcs.jobs if j.t_completed is not None and w0 <= j.t_completed <= t_end
                       and j.t_completed - j.t_assigned >= PARTIAL_S)
         held = sum(1 for j in self.mcs.held.values() if t_end - j.t_assigned >= PARTIAL_S)

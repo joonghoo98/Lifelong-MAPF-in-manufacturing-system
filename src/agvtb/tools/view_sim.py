@@ -127,13 +127,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if viewer.run() in ("end", "frozen"):
             viewer.hold()
-    result = sim.result()
+    pygame.quit()  # close the window first: the overlap check of a long run takes a while (final review I3)
+    print(f"checking the run up to t {sim.now:.1f} s ...", flush=True)
+    result = sim.result(viewer.warmup)
     d = result.deadlock
     findings = sum(len(found) for found in result.checks.values())
-    print(f"{lw.world.name}: {result.kpi['completed']} jobs completed by t {result.t_end:.1f} s, global deadlock "
-          f"{d['global']}, partial {d['partial_jobs'] + d['held_at_end']}, wait cycles {len(d['wait_cycles'])}, "
-          f"{findings} check findings")
-    pygame.quit()
+    print(f"{lw.world.name}: {result.kpi['completed']} jobs completed in [{viewer.warmup:g}, {result.t_end:.1f}] s, "
+          f"global deadlock {d['global']}, partial {d['partial_jobs'] + d['held_at_end']}, wait cycles "
+          f"{len(d['wait_cycles'])}, {findings} check findings")
     return 0
 
 

@@ -151,3 +151,12 @@ def test_a_run_without_an_end_goes_on(mini):  # user 2026-10-22: the viewer runs
     sim = Simulation(lw, cands, SimConfig(4, 2.0, 0, 0.0, math.inf, 0.5))
     sim.advance_to(1000.0)
     assert sim.now == 1000.0 and sim.end == math.inf and sim.result().kpi["completed"] > 0
+
+
+def test_the_summary_takes_the_warm_up_set_in_the_viewer(mini):  # final review minor, re-graded Important
+    from agvtb.sim.simulator import Simulation
+
+    lw, cands = mini
+    sim = Simulation(lw, cands, SimConfig(4, 2.0, 0, 0.0, math.inf, 0.5))
+    sim.advance_to(900.0)
+    assert sim.result(warmup=300.0).kpi == sim.kpi(300.0, 900.0)

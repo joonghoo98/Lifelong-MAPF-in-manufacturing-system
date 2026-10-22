@@ -5,9 +5,10 @@ most 60 s of simulated time per frame; the first frame only starts the clock), a
 The events are run by the simulation's own kernel, so the drawing speed never changes the results. The map is
 drawn once onto a background surface.
 
-Keys: S speed, W warm-up, T sim time (type a number, Enter; Esc cancels), F fast run, Space pause, + / - speed
-step, . one dt step while paused, Esc quit. A fast run computes event to event without drawing each step, up to
-warm-up + sim time, then goes on at the set speed (user decision, 2026-10-22). The KPI lines are those of
+Keys: S speed, W warm-up, T sim time (type a number, Enter; Esc cancels), F fast run (F again stops it), Space
+pause, + / - speed step, . one dt step while paused, Esc quit. A fast run computes event to event without pacing, up
+to warm-up + sim time, then goes on at the set speed (user decision, 2026-10-22); it draws and reads the keys about
+every 0.1 s of wall time, which only decides when to draw, never what happens. The KPI lines are those of
 [warm-up end, now], as DAIM measures after its warm-up.
 """
 import math
@@ -20,7 +21,8 @@ from agvtb.viz.scene import Scene, build_scene
 
 SPEEDS = (1.0, 2.0, 5.0, 10.0, 30.0, 100.0)
 MAX_STEP_S = 60.0
-FAST_CHUNK_S = 1800.0  # simulated time a fast run computes between two frames
+FAST_STEP_S = 10.0  # a fast run computes in steps of this much simulated time ...
+FAST_FRAME_S = 0.1  # ... and draws a frame after about this much wall time
 FPS = 60
 KIND_COLOR = {"move": (40, 170, 60), "rotate": (0, 160, 170), "blocked": (210, 40, 40), "dwell": (240, 150, 20),
               "rest": (130, 130, 130)}
@@ -171,9 +173,12 @@ class Viewer:
             return None
         if event.key in FIELDS:
             self.editing, self.buffer = FIELDS[event.key], ""
+        elif event.key == pygame.K_f and self.fast_target is not None:
+            self.fast_target = None
         elif event.key == pygame.K_f:
             target = self.warmup + self.sim_time
-            self.fast_target = target if target > self.sim.now else None
+            if target > self.sim.now:
+                self.fast_target, self.paused = target, False
         elif event.key == pygame.K_ESCAPE:
             return "quit"
         if event.key == pygame.K_SPACE:
@@ -196,11 +201,19 @@ class Viewer:
                 if reason:
                     return reason
             now = clock()
-            if self.fast_target is not None:  # event to event, no pacing; a frame now and then for progress
-                self.sim.advance_to(min(self.fast_target, self.sim.now + FAST_CHUNK_S))
-                if self.sim.now >= self.fast_target or self.sim.stopped:
-                    self.fast_target = None
-            elif last is not None and not self.paused:
+            if self.paused:
+                pass
+            elif self.fast_target is not None:  # event to event, no pacing; a frame now and then for progress
+                deadline = now + FAST_FRAME_S
+                while True:
+                    self.sim.advance_to(min(self.fast_target, self.sim.now + FAST_STEP_S))
+                    if self.sim.now >= min(self.fast_target, self.sim.end) or self.sim.stopped:
+                        self.fast_target = None
+                        break
+                    if clock() >= deadline:
+                        break
+                now = clock()  # the compute time is not paced in the next frame (final review I1)
+            elif last is not None:
                 self.sim.advance_to(self.sim.now + min(MAX_STEP_S, (now - last) * self.speed))
             last = now
             self.draw()
