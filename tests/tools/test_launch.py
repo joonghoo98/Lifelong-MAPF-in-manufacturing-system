@@ -33,3 +33,29 @@ def test_main_runs_the_viewer_with_the_answers():
 def test_the_bat_file_runs_the_launcher_from_its_own_folder():
     text = (REPO / "view_sim.bat").read_text(encoding="ascii")
     assert 'cd /d "%~dp0"' in text and '".venv\\Scripts\\python.exe" -m agvtb.tools.launch' in text
+
+
+def test_ctrl_c_or_end_of_input_ends_quietly(capsys):  # review: no traceback
+    def stop(prompt):
+        raise KeyboardInterrupt
+
+    def eof(prompt):
+        raise EOFError
+
+    assert main(input_fn=stop, run=lambda argv: 0, root=CONFIGS) == 1
+    assert main(input_fn=eof, run=lambda argv: 0, root=CONFIGS) == 1
+    assert "Traceback" not in capsys.readouterr().out
+
+
+def test_a_gate_refusal_asks_again(capsys):  # review: too many vehicles for the map
+    codes = iter([3, 0])
+    got = []
+    assert main(input_fn=feed("2", "99", "", "", "", "", "", "", "", ""),
+                run=lambda argv: got.append(argv) or next(codes), root=CONFIGS) == 0
+    assert [a[2] for a in got] == ["99", "8"] and "try fewer vehicles or another map" in capsys.readouterr().out
+
+
+def test_words_get_a_plain_message():
+    shown = []
+    build_argv(feed("abc", "", "abc", "", "abc", "", "abc", "", "abc", ""), shown.append, CONFIGS)
+    assert len(shown) > 5 and not any("invalid literal" in line or "could not convert" in line for line in shown)

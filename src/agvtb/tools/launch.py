@@ -37,9 +37,16 @@ def _ask(question: str, default, parse: Callable[[str], object], input_fn, print
             print_fn(f"  {exc}; try again")
 
 
+def _number(text: str, kind: type) -> float:
+    try:
+        return kind(text)
+    except ValueError:
+        raise ValueError("needs a whole number" if kind is int else "needs a number") from None
+
+
 def _int_at_least(low: int) -> Callable[[str], int]:
     def parse(text: str) -> int:
-        value = int(text)
+        value = _number(text, int)
         if value < low:
             raise ValueError(f"needs a whole number >= {low}")
         return value
@@ -47,14 +54,14 @@ def _int_at_least(low: int) -> Callable[[str], int]:
 
 
 def _rate(text: str) -> float:
-    value = float(text)
+    value = _number(text, float)
     if not (math.isfinite(value) and value >= 0):
         raise ValueError("needs a number >= 0")
     return value
 
 
 def _speed(text: str) -> float:
-    value = float(text)
+    value = _number(text, float)
     if value not in SPEEDS:
         raise ValueError(f"needs one of {', '.join(f'{s:g}' for s in SPEEDS)}")
     return value
@@ -71,7 +78,7 @@ def build_argv(input_fn=input, print_fn=print, root: Path = Path("configs") / "m
     default_map = next((i for i, p in enumerate(configs, 1) if p.stem == DEFAULT_MAP), 1)
 
     def pick(text: str) -> int:
-        value = int(text)
+        value = _number(text, int)
         if not 1 <= value <= len(configs):
             raise ValueError(f"needs a number from 1 to {len(configs)}")
         return value
@@ -87,12 +94,22 @@ def build_argv(input_fn=input, print_fn=print, root: Path = Path("configs") / "m
 
 def main(argv: list[str] | None = None, input_fn=input, run: Callable[[list[str]], int] | None = None,
          root: Path = Path("configs") / "maps") -> int:
-    """Ask, then run the live viewer; its exit code."""
-    args = build_argv(input_fn, print, root)
-    print("Keys in the window: Space pause, + / - speed, . one step while paused, Esc quit.", flush=True)
+    """Ask, then run the live viewer; its exit code. A gate refusal (too many vehicles for the map) asks again;
+    Ctrl+C or the end of input during the questions ends quietly with 1."""
     if run is None:
         from agvtb.tools.view_sim import main as run
-    return run(args)
+    while True:
+        try:
+            args = build_argv(input_fn, print, root)
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 1
+        print("Keys in the window: Space pause, + / - speed, . one step while paused, Esc quit.", flush=True)
+        code = run(args)
+        if code != 3:
+            return code
+        print("The map cannot take that many vehicles: try fewer vehicles or another map.", flush=True)
+        print(flush=True)
 
 
 if __name__ == "__main__":
