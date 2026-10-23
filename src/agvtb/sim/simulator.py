@@ -18,7 +18,7 @@ from agvtb.planning.intervals import INF
 from agvtb.planning.ledger import SidingLedger
 from agvtb.planning.offline import initial_stop
 from agvtb.planning.reservations import affects, path_constraints
-from agvtb.planning.safe_tail import SafeTailPlanner, reverse_times
+from agvtb.planning.safe_tail import SafeTailPlanner, reverse_times, tail_cut_index
 from agvtb.sim.demand import Demand, normalize, uniform_fromto
 from agvtb.sim.executor import Executor, wait_cycles, world_geometry
 from agvtb.sim.jobs import Job, Mcs
@@ -44,6 +44,8 @@ class SimConfig:
     dt: float = 0.5
     budget: int | None = None
     fromto: Mapping[tuple[str, str], float] | None = None
+    tail_cut: bool = True  # tail cut A2, on by default (user decision 2026-10-23, design §9)
+    cut_margin: float = 0.0  # A2: the old plan must leave the splice at now + margin or later (seconds)
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,7 @@ class Commit:
     start_t: float
     moving: bool  # the vehicle was still running its earlier path when this one was committed
     fallback: bool
+    cut: bool = False  # planned from the splice of its tail (A2)
 
 
 @dataclass(frozen=True)
@@ -156,7 +159,11 @@ class Simulation:
         self.counts = {"plan_fail": 0, "inline_miss": 0, "event_cycles": 0, "commits": 0, "unplanned_delivery": 0,
                        "tapg_cycles": 0, "event_forever_edges_max": 0, "commit_gate_checks": 0,
                        "commit_gate_rejected": 0, "commit_gate_preexisting_cycle": 0, "commit_gate_fallback_fail": 0,
-                       "commit_gate_fallback_cycle": 0, "commit_gate_revoke_refused": 0}
+                       "commit_gate_fallback_cycle": 0, "commit_gate_revoke_refused": 0,
+                       "cut_none": 0, "cut_try": 0, "cut_ok": 0, "cut_ok_port": 0, "cut_ok_transit": 0,
+                       "cut_search_fail": 0, "cut_aborted_claimed": 0, "cut_gate_rejected": 0,
+                       "cut_gate_preexisting_cycle": 0, "cut_gate_revoke_refused": 0, "cut_restore_cycle": 0,
+                       "cut_tail_s": 0.0, "cut_wake": 0, "cut_protect_violations": 0}
         self.cycles_seen: set[tuple[int, ...]] = set()
         self.wait_cycles: list[tuple[float, tuple[int, ...]]] = []
         self.last_completion = 0.0
@@ -192,7 +199,19 @@ class Simulation:
         table = self._dist_cache.get(src)
         if table is None:
             table = self._dist_cache[src] = reverse_times(self.graph, [src])
-        return table.get(self.tapg.paths[vid][-1][0], INF)
+        return table.get(self._dist_start(vid), INF)
+
+    def _dist_start(self, vid: int) -> str:
+        """Where a vehicle's next plan starts, and its dispatch distance is measured from (D5): its own siding stop,
+        or with A2 on the splice of its tail when it has one, found on the TAPG as it is at dispatch, before the
+        replan re-times it (user decision 2026-10-23)."""
+        path = self.tapg.paths[vid]
+        if self.cfg.tail_cut:
+            v = self.executor.vehicles[vid]
+            k = tail_cut_index(path, v.path_idx, v.claim_idx, self.kernel.now, self.cfg.cut_margin)
+            if k > 0:
+                return path[k - 1][0]
+        return path[-1][0]
 
     def _arrival(self, t: float, src: str) -> None:
         dst, nxt = self.demand.on_arrival(t, src)
@@ -285,24 +304,29 @@ class Simulation:
         for _dt, vid in tasks:
             legs = self.pending[vid]
             path = self.tapg.paths[vid]
-            start_sid, start_t = path[-1]
             table = _table(cons, vid)
-            res = self.planner.plan_task(start_sid, start_t, legs, table, self.ledger.candidates(vid),
-                                         self.ledger.home(vid))
-            if res is None:
-                self.counts["plan_fail"] += 1
-                self._log(t, "plan_fail", vid, tuple(legs))
-                continue
-            self._check_plan(t, vid, res, legs)
-            old_len = len(path)
             moving = self.executor.vehicles[vid].state != "DONE"
-            self.tapg.append(vid, res.path)
-            self.executor.kick(vid, t)  # DAIM's append wakes a finished vehicle (env:1664-1670); the gate may revoke
-            res = self._commit_gate(t, vid, res, legs, table, old_len)
-            if res is None:  # revoked and no fallback: pending, like a failed plan (DAIM vis:5452-5455)
-                self.counts["plan_fail"] += 1
-                self._log(t, "plan_fail", vid, tuple(legs))
-                continue
+            cut = self._try_cut(t, vid, legs, table) if self.cfg.tail_cut and len(legs) == 2 else None
+            if cut is not None:  # A2: committed from the splice k (DAIM vis:5434-5441)
+                res, old_len = cut
+                start_sid, start_t = res.path[0]
+            else:
+                start_sid, start_t = path[-1]
+                res = self.planner.plan_task(start_sid, start_t, legs, table, self.ledger.candidates(vid),
+                                             self.ledger.home(vid))
+                if res is None:
+                    self.counts["plan_fail"] += 1
+                    self._log(t, "plan_fail", vid, tuple(legs))
+                    continue
+                self._check_plan(t, vid, res, legs)
+                old_len = len(path)
+                self.tapg.append(vid, res.path)
+                self.executor.kick(vid, t)  # DAIM's append wakes a finished vehicle (env:1664-1670); the gate may revoke
+                res = self._commit_gate(t, vid, res, legs, table, old_len)
+                if res is None:  # revoked and no fallback: pending, like a failed plan (DAIM vis:5452-5455)
+                    self.counts["plan_fail"] += 1
+                    self._log(t, "plan_fail", vid, tuple(legs))
+                    continue
             if self.tapg.has_cycle():  # the node graph itself: recompute stops re-timing on a cycle
                 self.counts["tapg_cycles"] += 1
                 self.checks["tapg_cycles"].append({"t": t, "vid": vid})
@@ -314,9 +338,15 @@ class Simulation:
             self.tapg.mark_dwell(vid, self.arrival[vid])
             job = self.mcs.held[vid]
             self.span[vid] = (job.jid, old_len, old_len + len(res.path) - 1)
-            cons[vid] = [c for c in cons[vid] if c[2] != INF] + path_constraints(res.path, self.graph, self.conflicts)
-            self._check_tapg(t, vid, old_len)
-            self.commits.append(Commit(t, vid, tuple(legs), start_sid, start_t, moving, res.fallback))
+            if cut is not None:  # the batch sees the vehicle's whole path, the old tail gone (DAIM vis:5437-5438)
+                cons[vid] = agent_constraints(self.tapg, self.executor, vid, t)
+            else:
+                cons[vid] = [c for c in cons[vid] if c[2] != INF] + path_constraints(res.path, self.graph, self.conflicts)
+            n_unprotected = len(self.checks["unprotected"])
+            self._check_tapg(t, vid, self.executor.vehicles[vid].path_idx if cut is not None else old_len)
+            if cut is not None:  # the kept prefix too (DAIM spec §7)
+                self.counts["cut_protect_violations"] += len(self.checks["unprotected"]) - n_unprotected
+            self.commits.append(Commit(t, vid, tuple(legs), start_sid, start_t, moving, res.fallback, cut is not None))
             self.counts["commits"] += 1
             self._log(t, "commit", vid, (tuple(legs), res.siding, res.fallback))
             del self.pending[vid]
@@ -325,6 +355,74 @@ class Simulation:
         if self.counts["commits"] > n0:
             self._post_check(t)
         self._find_cycles(t)
+
+    def _try_cut(self, t: float, vid: int, legs, table):
+        """Tail cut A2 (DAIM vis:5532-5574, spec 2026-10-16 §3-§4): the task is planned by search only from the splice
+        of the vehicle's tail, past its last load and what it has entered or claimed. (plan, splice k) when it is
+        committed; None leaves the TAPG's states and nodes as they were (the old tail back if the gate rejected the
+        cut) and A1 plans from the siding."""
+        path, v = self.tapg.paths[vid], self.executor.vehicles[vid]
+        k = tail_cut_index(path, v.path_idx, v.claim_idx, t, self.cfg.cut_margin)
+        if k < 0:
+            self.counts["cut_none"] += 1
+            return None
+        self.counts["cut_try"] += 1
+        start_sid, start_t = path[k - 1]
+        res = self.planner.search_task(start_sid, start_t, legs, table, self.ledger.candidates(vid))
+        if res is None:
+            self.counts["cut_search_fail"] += 1
+            return None
+        self._check_plan(t, vid, res, legs)
+        if not self.executor.revocable(vid, k):  # claimed meanwhile: a real vehicle's delay, not the simulation's
+            self.counts["cut_aborted_claimed"] += 1
+            return None
+        old_tail = list(path[k:])
+        self.executor.wake(self.tapg.revoke_beyond(vid, k), t)
+        self._cut_attach(t, vid, k, res.path)
+        cyc, _ = self._event_cycle()
+        if cyc is not None and not self._cut_gate(t, vid, k, res, old_tail, legs, cyc):
+            return None
+        prev = self.span.get(vid)  # read before the records overwrite it (DAIM final review m4)
+        at_port = prev is not None and self.graph[start_sid].nodes[0] == self.mcs.jobs[prev[0]].dst
+        self.counts["cut_ok"] += 1
+        self.counts["cut_ok_port" if at_port else "cut_ok_transit"] += 1
+        self.counts["cut_tail_s"] += old_tail[-1][1] - start_t
+        self._log(t, "tail_cut", vid, (k, at_port))
+        return res, k
+
+    def _cut_attach(self, t: float, vid: int, k: int, new_path) -> None:
+        """new_path (its first state the splice path[k-1]) goes on after the splice; the kept prefix [path_idx, k)
+        gets its cross edges again, as the revoke took the splice's and the ones built through the old tail went
+        with it (DAIM vis:5576-5593, final review I2); a vehicle blocked on a stop of its tail looks again now
+        (final review C1). No kick: with a splice the vehicle still has states ahead, so it is not DONE."""
+        self.tapg.append(vid, new_path)
+        self.tapg.add_cross_edges(vid, min(self.executor.vehicles[vid].path_idx, k - 1), k)
+        if self.executor.retry(vid, t):
+            self.counts["cut_wake"] += 1
+
+    def _cut_gate(self, t: float, vid: int, k: int, res, old_tail, legs, cyc) -> bool:
+        """The cut's commit gate (DAIM vis:5595-5615, spec §4-5), after a cycle cyc: True keeps the cut, False gave
+        the old tail back (A1 plans next). A refused revoke, an older cycle and a cycle after the old tail is back are
+        findings (stricter than DAIM, as B's)."""
+        if not self.executor.revocable(vid, k):
+            self.counts["cut_gate_revoke_refused"] += 1
+            self.checks["commit_gate"].append({"t": t, "vid": vid, "why": "cut_revoke_refused", "cycle": cyc[:8]})
+            return True
+        self.executor.wake(self.tapg.revoke_beyond(vid, k), t)
+        cyc, _ = self._event_cycle()
+        if cyc is not None:
+            self.counts["cut_gate_preexisting_cycle"] += 1
+            self.checks["commit_gate"].append({"t": t, "vid": vid, "why": "cut_preexisting", "cycle": cyc[:8]})
+            self._cut_attach(t, vid, k, res.path)
+            return True
+        self.counts["cut_gate_rejected"] += 1
+        self._log(t, "tail_cut_rejected", vid, tuple(legs))
+        self._cut_attach(t, vid, k, [self.tapg.paths[vid][-1]] + old_tail)
+        cyc, _ = self._event_cycle()
+        if cyc is not None:
+            self.counts["cut_restore_cycle"] += 1
+            self.checks["commit_gate"].append({"t": t, "vid": vid, "why": "cut_restore", "cycle": cyc[:8]})
+        return False
 
     def _commit_gate(self, t: float, vid: int, res, legs, table, old_len: int):
         """Commit gate B (DAIM vis:5499-5530, spec §6.2): the plan is on the TAPG; if the execution event graph

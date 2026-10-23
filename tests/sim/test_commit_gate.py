@@ -24,7 +24,7 @@ PRE_B = {  # events_sha256 at master 47ab4ff, before B (plans/2026-10-22-m5b-gat
 
 
 def cfg(n, rate, warm=0.0, meas=900.0):
-    return SimConfig(n, rate, 0, warm, meas, 0.5)
+    return SimConfig(n, rate, 0, warm, meas, 0.5, tail_cut=False)  # B on the A1 path (M5c: A2 is on by default)
 
 
 def force_cycles(monkeypatch, which):

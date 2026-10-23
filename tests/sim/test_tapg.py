@@ -102,3 +102,24 @@ def test_revoke_beyond_drops_the_new_states_and_the_new_tails_cross_edges():  # 
     assert g.revoke_beyond(1, 5) == [] and g.paths[1] == [("S,c10,0", 0.0)]
     with pytest.raises(ValueError):
         g.revoke_beyond(1, 0)
+
+
+def splice_case(restore):
+    """Vehicle 1's tail move c11 -> c12 carries the order 'vehicle 1 leaves c11, then vehicle 2 comes in'. The cut at
+    the splice S,c11 drops that move; only the restore gives the splice itself the edge to vehicle 2."""
+    graph, conflicts, _ports = fake_room_with_spurs()
+    g = Tapg(graph, conflicts)
+    g.add_vehicle(1, "S,c10,0", 0.0)
+    g.add_vehicle(2, "S,c21,0", 0.0)
+    g.append(1, [("S,c10,0", 0.0), ("M,c10,c11", 0.0), ("S,c11,0", 2.0), ("M,c11,c12", 2.0), ("S,c12,0", 4.0)])
+    g.append(2, [("S,c21,0", 0.0), ("M,c21,c11", 10.0), ("S,c11,0", 12.0), ("M,c11,c01", 12.0), ("S,c01,0", 14.0)])
+    g.revoke_beyond(1, 3)
+    g.append(1, [("S,c11,0", 2.0), ("M,c11,c10", 5.0), ("S,c10,0", 7.0)])
+    if restore:
+        g.add_cross_edges(1, 0, 3)
+    return g
+
+
+def test_the_restore_gives_the_splice_its_edge_to_the_later_vehicle():  # DAIM spec §2-3, §8.1-4; Review Focus 3
+    on, off = splice_case(True), splice_case(False)
+    assert ("M,c21,c11", 2, 10.0) in on.succs(on.key(1, 2)) and not any(s[1] == 2 for s in off.succs(off.key(1, 2)))

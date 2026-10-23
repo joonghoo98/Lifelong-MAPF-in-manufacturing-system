@@ -63,7 +63,7 @@ def test_event_log_ignores_hash_seed(base):
 
 
 def test_a_vehicle_on_its_tail_plans_from_its_siding(mini):  # Review Focus 2, research §A3
-    r = short(mini, n_vehicles=2, rate_per_min=4.0)
+    r = short(mini, n_vehicles=2, rate_per_min=4.0, tail_cut=False)  # A1 (M5c: A2 is on by default)
     assert r.ok and all(c.start_t >= c.t - 1e-6 for c in r.commits)  # path times are kept to 6 decimals (env:1942)
     assert any(c.moving and c.start_t > c.t for c in r.commits)  # a tail still running when the job came
 

@@ -91,6 +91,11 @@ class Tapg:
                 self._add_edge(prev, nk)
         self._cross_edges(vid, lo, hi)
 
+    def add_cross_edges(self, vid: int, lo: int, hi: int) -> None:
+        """Build the cross edges both ways again for vid's states [lo, hi) (DAIM env add_cross_edges_for_extensions):
+        after a tail cut, the kept prefix's order to the other vehicles (vis:5588-5593)."""
+        self._cross_edges(vid, lo, hi)
+
     def _cross_edges(self, ai: int, lo: int, hi: int) -> None:
         """research §B2 (env:1676-1803): both directions between the new states of ai and every other path."""
         pi = self.paths[ai]
