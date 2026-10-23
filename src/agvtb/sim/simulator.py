@@ -78,35 +78,37 @@ class SimResult:
                 and not any(self.checks.values()) and defects == 0)
 
 
-def live_constraints(tapg: Tapg, executor: Executor, now: float) -> dict[int, list[tuple[str, float, float]]]:
-    """Each vehicle's reservations (key, lo, hi) as the planner sees them now (DAIM vis:6388-6462, research §A4):
+def agent_constraints(tapg: Tapg, executor: Executor, vid: int, now: float) -> list[tuple[str, float, float]]:
+    """One vehicle's reservations (key, lo, hi) as the planner sees them now (DAIM vis:6388-6462, research §A4):
     the current state from now, the claimed states from now to their end, the rest at their plan times."""
     graph, conflicts = tapg.graph, tapg.conflicts
 
     def cost(sid: str) -> float:
         return graph[sid].duration_s or 0.0
 
-    out: dict[int, list[tuple[str, float, float]]] = {}
-    for vid in sorted(tapg.paths):
-        path, v = tapg.paths[vid], executor.vehicles[vid]
-        cons: list[tuple[str, float, float]] = []
-        idx = min(v.path_idx, len(path) - 1)
-        cur = path[idx][0]
-        end_cur = max(path[idx + 1][1], now) if idx + 1 < len(path) else INF
-        cons.append((geom_key(cur), now, end_cur))
-        cons += [(x, max(0.0, now - cost(x)), end_cur) for x in affects(conflicts, cur)]
-        claimed = path[idx:v.claim_idx]
-        for ci, (sid, _t) in enumerate(claimed):
-            if ci + 1 < len(claimed):
-                end = claimed[ci + 1][1]
-            else:
-                end = path[v.claim_idx][1] if v.claim_idx < len(path) else INF
-            cons.append((geom_key(sid), now, end))
-            cons += [(x, max(0.0, now - cost(x)), end) for x in affects(conflicts, sid)]
-        if v.claim_idx < len(path):
-            cons += path_constraints(path[v.claim_idx:], graph, conflicts)
-        out[vid] = cons
-    return out
+    path, v = tapg.paths[vid], executor.vehicles[vid]
+    cons: list[tuple[str, float, float]] = []
+    idx = min(v.path_idx, len(path) - 1)
+    cur = path[idx][0]
+    end_cur = max(path[idx + 1][1], now) if idx + 1 < len(path) else INF
+    cons.append((geom_key(cur), now, end_cur))
+    cons += [(x, max(0.0, now - cost(x)), end_cur) for x in affects(conflicts, cur)]
+    claimed = path[idx:v.claim_idx]
+    for ci, (sid, _t) in enumerate(claimed):
+        if ci + 1 < len(claimed):
+            end = claimed[ci + 1][1]
+        else:
+            end = path[v.claim_idx][1] if v.claim_idx < len(path) else INF
+        cons.append((geom_key(sid), now, end))
+        cons += [(x, max(0.0, now - cost(x)), end) for x in affects(conflicts, sid)]
+    if v.claim_idx < len(path):
+        cons += path_constraints(path[v.claim_idx:], graph, conflicts)
+    return cons
+
+
+def live_constraints(tapg: Tapg, executor: Executor, now: float) -> dict[int, list[tuple[str, float, float]]]:
+    """Every vehicle's agent_constraints."""
+    return {vid: agent_constraints(tapg, executor, vid, now) for vid in sorted(tapg.paths)}
 
 
 def _table(cons: Mapping[int, list[tuple[str, float, float]]], exclude: int) -> dict[str, list[tuple[float, float]]]:

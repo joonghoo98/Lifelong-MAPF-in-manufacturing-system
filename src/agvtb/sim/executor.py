@@ -174,6 +174,16 @@ class Executor:
             self.on_event(t, "block", v.vid, (self.tapg.paths[v.vid][v.path_idx][0],))
         v.state, v.v = "WAITING", 0.0
 
+    def retry(self, vid: int, t: float) -> bool:
+        """After a tail cut: a vehicle blocked on a stop (not dwelling) looks again now, as what blocked it may be
+        gone; else nobody wakes it (DAIM vis:5583-5586, A2 final review C1). Still blocked, it waits again."""
+        v = self.vehicles[vid]
+        if v.state != "WAITING" or v.dwelling or v.path_idx >= len(self.tapg.paths[vid]):
+            return False
+        self.on_event(t, "retry", vid, ())
+        self.kernel.schedule(t, AGV, self._try_advance, vid)
+        return True
+
     def wake(self, vids: list[int], t: float) -> None:
         for w in vids:
             other = self.vehicles.get(w)

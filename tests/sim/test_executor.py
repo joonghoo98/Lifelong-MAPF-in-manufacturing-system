@@ -4,6 +4,7 @@ import pytest
 
 from agvtb.sim.executor import Executor, wait_cycles, world_geometry
 from agvtb.sim.kernel import Kernel
+from agvtb.sim.simulator import agent_constraints, live_constraints
 from agvtb.sim.tapg import Tapg
 from helpers import fake_room_with_spurs, spur_room_world
 
@@ -102,3 +103,49 @@ def test_revocable_only_beyond_the_entered_and_claimed_states():  # DAIM env:156
     v = ex.vehicles[1]
     v.path_idx, v.claim_idx = 2, 4
     assert [ex.revocable(1, k) for k in (2, 3, 4, 5)] == [False, False, True, True]
+
+
+def test_retry_only_for_a_vehicle_blocked_on_a_stop():  # DAIM vis:5583-5586 (A2 final review C1)
+    ex, _ = run({1: [("S,c00,0", 0.0), ("M,c00,c10", 0.0), ("S,c10,0", 2.0)]})
+    v, n = ex.vehicles[1], len(ex.tapg.paths[1])
+    assert v.state == "DONE" and not ex.retry(1, 60.0)
+    v.state, v.dwelling, v.path_idx = "WAITING", True, n - 1
+    assert not ex.retry(1, 60.0)                 # dwelling at a port: its load end wakes it
+    v.dwelling, v.path_idx = False, n
+    assert not ex.retry(1, 60.0)                 # nothing left to enter
+    v.path_idx = n - 1
+    assert ex.retry(1, 60.0)                     # blocked on a stop: it looks again now
+
+
+def blocked_on_c10():
+    """Vehicle 2's planned pass through c11 (not executed: vehicle 2 is not in the executor) comes before vehicle 1's
+    move c10 -> c11, so vehicle 1 waits on S,c10 for good (plan review 1, important 2)."""
+    graph, conflicts = fake_room_with_spurs()[:2]
+    k, g = Kernel(), Tapg(graph, conflicts)
+    g.add_vehicle(1, "S,c10,0", 0.0)
+    g.add_vehicle(2, "S,c21,0", 0.0)
+    ex = Executor(graph, g, k, lambda sid: (1.0, 0.5), 0.5, 0.5, lambda *a: None)
+    g.append(1, [("S,c10,0", 0.0), ("M,c10,c11", 10.0), ("S,c11,0", 12.0), ("M,c11,c12", 12.0), ("S,c12,0", 14.0)])
+    g.append(2, [("S,c21,0", 0.0), ("M,c21,c11", 0.0), ("S,c11,0", 2.0), ("M,c11,c01", 2.0), ("S,c01,0", 4.0)])
+    ex.add(1)
+    k.run_until(5.0, dt=0.5)
+    return k, g, ex
+
+
+def test_a_vehicle_blocked_on_its_splice_moves_only_if_retried():  # DAIM final review C1; Review Focus 1
+    for retried in (True, False):
+        k, g, ex = blocked_on_c10()
+        v = ex.vehicles[1]
+        assert v.state == "WAITING" and v.path_idx == 0 and not v.dwelling
+        g.revoke_beyond(1, 1)                     # the cut at the splice S,c10, another way on
+        g.append(1, [("S,c10,0", 0.0), ("M,c10,c00", 5.0), ("S,c00,0", 7.0)])
+        if retried:
+            assert ex.retry(1, 5.0)
+        k.run_until(60.0, dt=0.5)
+        assert (v.state == "DONE") is retried
+
+
+def test_live_constraints_are_each_vehicles_own():  # the A2 batch update rebuilds one vehicle (DAIM vis:5437-5438)
+    ex, _ = run({1: [("S,c00,0", 0.0), ("M,c00,c10", 0.0), ("S,c10,0", 2.0)],
+                 2: [("S,c20,0", 0.0), ("M,c20,c21", 0.0), ("S,c21,0", 2.0)]})
+    assert live_constraints(ex.tapg, ex, 3.0) == {vid: agent_constraints(ex.tapg, ex, vid, 3.0) for vid in (1, 2)}
