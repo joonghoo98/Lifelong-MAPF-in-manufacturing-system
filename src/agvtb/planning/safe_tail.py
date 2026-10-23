@@ -51,6 +51,20 @@ def reverse_times(graph: StateGraph, goal_nodes: Iterable[str]) -> dict[str, flo
     return dist
 
 
+def tail_cut_index(path: Sequence[tuple[str, float]], path_idx: int, claim_idx: int, now: float,
+                   margin: float = 0.0) -> int:
+    """The splice k of tail cut A2 (DAIM safe_tail_planner.py:38-52, spec 2026-10-16 §3.2): path[:k] stays and
+    path[k:], the old tail, goes. path[k-1] is a stop past the last load (the previous task's L stays) and past
+    what the vehicle has entered or claimed, there is a tail to cut, and the old plan leaves the splice at
+    now + margin or later (the margin imitates a real vehicle's planning delay). The smallest such k, else -1."""
+    n = len(path)
+    last_l = max((i for i, (sid, _) in enumerate(path) if sid.startswith("L,")), default=-1)
+    for k in range(max(int(path_idx) + 1, int(claim_idx), last_l + 2, 1), n):
+        if path[k - 1][0].startswith("S,") and path[k][1] >= now + margin - EPS:
+            return k
+    return -1
+
+
 @dataclass(frozen=True)
 class TaskPlan:
     path: list[tuple[str, float]]  # first element: the start stop and the start time
@@ -82,6 +96,7 @@ class SafeTailPlanner:
         self.dwell_s = float(dwells[0]) if dwells else 0.0
         self.stats: collections.Counter[str] = collections.Counter()
         self.expansions_ok: list[int] = []
+        self.cut_expansions_ok: list[int] = []  # tail cut A2's searches, apart from A1's (DAIM :146-147)
         self._stops_at: dict[str, list[str]] = collections.defaultdict(list)
         for sid in sorted(graph):
             if graph[sid].kind == "S":
@@ -170,24 +185,26 @@ class SafeTailPlanner:
         return out
 
     def search(
-        self, start_sid: str, t0: float, legs: Sequence[str], table: Table, candidates: Iterable[str]
+        self, start_sid: str, t0: float, legs: Sequence[str], table: Table, candidates: Iterable[str],
+        prefix: str = "",
     ) -> TaskPlan | None:
-        """The staged SIPP search. None on failure, counted in stats; a found plan is not counted here."""
+        """The staged SIPP search. None on failure, counted in stats under prefix + the reason (tail cut A2 uses
+        "cut_", DAIM :174-188); a found plan is not counted here."""
         t0 = float(t0)  # DAIM's plan_task converts it (:160)
         start_state = self.graph.get(start_sid)
         if start_state is None or start_state.kind != "S":
-            self.stats["start_invalid"] += 1
+            self.stats[prefix + "start_invalid"] += 1
             return None
         cache: dict[str, list[tuple[float, float]]] = {}
         iv0 = interval_at(self._ivs(geom_key(start_sid), table, cache), t0)
         if iv0 is None:
-            self.stats["start_blocked"] += 1
+            self.stats[prefix + "start_blocked"] += 1
             return None
         m = len(legs)
         h = self._hfun(legs)
         h0 = h(0, start_sid)
         if h0 == INF:
-            self.stats["unreachable"] += 1
+            self.stats[prefix + "unreachable"] += 1
             return None
         targets = set(candidates)
         start = (0, start_sid, iv0)
@@ -202,7 +219,7 @@ class SafeTailPlanner:
                 continue
             n += 1
             if n > self.budget:
-                self.stats["budget_exceeded"] += 1
+                self.stats[prefix + "budget_exceeded"] += 1
                 return None
             node = self.graph[sid].nodes[0]
             if k == m and iv[1] == INF and node in targets and self._parking_ok(sid, t, table):
@@ -216,10 +233,22 @@ class SafeTailPlanner:
                     best[key2] = a
                     parent[key2] = (key, seg)
                     heapq.heappush(heap, (a + hv, a, k2, s2, iv2))
-        self.stats["search_exhausted"] += 1
+        self.stats[prefix + "search_exhausted"] += 1
         return None
 
     # --- the task: search, else the fallback plan (DAIM :155-259) ---------------------------------------------------
+    def search_task(
+        self, start_sid: str, start_time: float, legs: Iterable[str], table: Table, candidates: Iterable[str]
+    ) -> TaskPlan | None:
+        """Tail cut A2 (DAIM :174-188, spec 2026-10-16 §3.3-§3.4): the staged search only, no fallback plan (its wait
+        for T* is safe only on the vehicle's own siding), counted apart from A1 under cut_. None: A1 plans."""
+        res = self.search(start_sid, float(start_time), [str(p) for p in legs], table, {str(c) for c in candidates},
+                          prefix="cut_")
+        if res is not None:
+            self.stats["cut_search_ok"] += 1
+            self.cut_expansions_ok.append(res.expansions)
+        return res
+
     def plan_task(
         self,
         start_sid: str,

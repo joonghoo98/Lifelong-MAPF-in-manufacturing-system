@@ -149,3 +149,13 @@ def test_budget_default_and_bad_inputs():  # Review Focus 3
     odd["L,c50,0"] = dataclasses.replace(graph["L,c50,0"], duration_s=5.0)
     with pytest.raises(ValueError, match=r"5\.0"):
         SafeTailPlanner(odd, conflicts, SIDINGS)
+
+
+def test_search_task_only_searches_and_counts_apart():  # A2 spec §3.3-§3.4 (DAIM safe_tail_planner.py:174-188)
+    pl = planner()
+    res = pl.search_task("S,c03,0", 0.0, ["c00", "c50"], {}, SIDINGS)
+    assert res.path == planner().search("S,c03,0", 0.0, ["c00", "c50"], {}, SIDINGS).path and not res.fallback
+    assert dict(pl.stats) == {"cut_search_ok": 1} and pl.cut_expansions_ok == [17]
+    small = planner(budget=5)
+    assert small.search_task("S,c03,0", 0.0, ["c00", "c50"], {}, SIDINGS) is None
+    assert dict(small.stats) == {"cut_budget_exceeded": 1}  # no fallback; apart from A1's budget_exceeded
