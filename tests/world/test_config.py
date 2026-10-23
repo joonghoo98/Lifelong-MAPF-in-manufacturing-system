@@ -76,6 +76,14 @@ def test_profile_path(tmp_path):
     # A "profile" key means nothing unless collision is "profile".
     assert load_map_config(_edit(path, collision="polygon")).profile_path is None
 
+def test_map_and_profile_paths_drop_the_parent_hops(tmp_path):
+    # Windows refuses paths over 260 characters, and the '..' hops alone can push a deep clone over (R23)
+    (tmp_path / "configs").mkdir()
+    path = tiny_config(tmp_path).rename(tmp_path / "configs" / "tiny.json")
+    cfg = load_map_config(_edit(path, map="../maps/tiny_map.json", collision="profile", profile="../maps/p.json"))
+    assert cfg.map_path == tmp_path / "maps" / "tiny_map.json"
+    assert cfg.profile_path == tmp_path / "maps" / "p.json"
+
 @pytest.mark.parametrize("name, units, collision, counts", [
     ("songdo_grid_bi", 20, "polygon", (1386, 4838, 10)),
     ("mini_deadend", 16.14, "grid", (166, 530, 16)),

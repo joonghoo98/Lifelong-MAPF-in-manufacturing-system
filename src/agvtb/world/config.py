@@ -1,6 +1,7 @@
 """Read a per-map config JSON: map file, scale, motion values, collision mode, and the optional siding variant."""
 import json
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,10 +47,10 @@ def load_map_config(path: str | Path) -> MapConfig:
     if collision == "profile":
         if "profile" not in data:
             raise ConfigError(f"{where}: collision 'profile' needs a 'profile' key")
-        profile_path = path.parent / _text(data, "profile", where)
+        profile_path = _beside(path, _text(data, "profile", where))
     return MapConfig(
         name=_text(data, "name", where),
-        map_path=path.parent / _text(data, "map", where),
+        map_path=_beside(path, _text(data, "map", where)),
         units_per_meter=_number(data, "units_per_meter", where),
         accel_mps2=_number(data, "accel_mps2", where),
         decel_mps2=_number(data, "decel_mps2", where),
@@ -59,6 +60,12 @@ def load_map_config(path: str | Path) -> MapConfig:
         profile_path=profile_path,
         sidings=_text(data, "sidings", where) if "sidings" in data else None,
     )
+
+
+def _beside(config: Path, relative: str) -> Path:
+    """relative, read from the config's folder, with the '..' hops folded away: Windows refuses paths over 260
+    characters, and the hops alone can push a deep clone over."""
+    return Path(os.path.normpath(config.parent / relative))
 
 
 def _text(data: dict, key: str, where: str) -> str:
