@@ -1,6 +1,6 @@
 {
   "name": "grid_songdo_dflp",
-  "map": "../../../../DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_dflp.json",
+  "map": "../../../data/daim/experiments/results/songdo_placement_engines/maps/grid_songdo_dflp.json",
   "units_per_meter": 1000,
   "accel_mps2": 0.5,
   "decel_mps2": 0.5,

@@ -1,0 +1,275 @@
+{
+ "note": "Byte-for-byte copies of the map data agv_testbed reads, so a clone runs on its own (report R23). source = where the file came from, relative to the MAPF folder that holds agv_testbed; DAIM files are tracked and clean at DAIM commit 9c04deb (daim_blob = git blob id there).",
+ "files": [
+  {
+   "path": "daim/Maps/json/songdo_CASE_v0_xMSmap.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/Maps/json/songdo_CASE_v0_xMSmap.json",
+   "bytes": 75364,
+   "sha256": "88b8b32659eddef3bb5e7c3f6d1aa9de2b046f900b99ec6bf6785bd11a28bdbd",
+   "daim_commit": "9c04deb",
+   "daim_blob": "71a94c1365f381303dbf9013610ef12ac4c796b0"
+  },
+  {
+   "path": "daim/Maps/json/songdo_CASE_v0_xMSmap_sidings.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/Maps/json/songdo_CASE_v0_xMSmap_sidings.json",
+   "bytes": 310,
+   "sha256": "42779f5efbb8c98bc93f672ad6800bcd62db4315f36da0a70eb19b0885805b9e",
+   "daim_commit": "9c04deb",
+   "daim_blob": "53bd9445da07e265e91afe9f911d15317ca16be5"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_dflp.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_dflp.grid.json",
+   "bytes": 6456,
+   "sha256": "30318c3cf33515bd4f54072ee070a9b70f1cbbc0db2e7b972a8419ec5328d84c",
+   "daim_commit": "9c04deb",
+   "daim_blob": "e3c96a43e76218b9db7705c255bd38b4c9b950bc"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_dflpbr.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_dflpbr.grid.json",
+   "bytes": 8100,
+   "sha256": "541cf04ae391a0afd0a6a4bfe9d7294ca6e3fa830deb89a89d8d99c9c4c86d3e",
+   "daim_commit": "9c04deb",
+   "daim_blob": "6c5eb7e28b393d963e7fbb84e075e34f5a2e012b"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_greedy.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_greedy.grid.json",
+   "bytes": 8237,
+   "sha256": "7c9ba986792d073b91515c5bc54e77287642f86b62a8837781a4ae5cfb1b87f1",
+   "daim_commit": "9c04deb",
+   "daim_blob": "b47c3e3870c3f29bac90a4705096b04cdee540ec"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_greedybr.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_greedybr.grid.json",
+   "bytes": 8248,
+   "sha256": "235a5c71b8a48a512a45dab791cac4487901260804981ee611b9b4acdcb07300",
+   "daim_commit": "9c04deb",
+   "daim_blob": "bd345b4252a76e21779f6d99e77088e5766bf6ce"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_joint.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_joint.grid.json",
+   "bytes": 8106,
+   "sha256": "545a695c43e8dae2b43215caca4d8555c9f4357c3fba23bceed879e2f3508c51",
+   "daim_commit": "9c04deb",
+   "daim_blob": "7ce138313ba8e9ec508149ed83fc311bf518ea74"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_manual.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_manual.grid.json",
+   "bytes": 8275,
+   "sha256": "c860124e1d035277793a6cde2edaa4d5364657c13a2aa99838f77ee2dce7fe45",
+   "daim_commit": "9c04deb",
+   "daim_blob": "8b1cf17ad5cb7ad7ce8ff6c262077d25685274c0"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_rand.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_rand.grid.json",
+   "bytes": 8312,
+   "sha256": "223751d81f808dabdc01813b9bd11d2b92bfc1253606d538a037f3e9bb0e167a",
+   "daim_commit": "9c04deb",
+   "daim_blob": "83353178f1e6c5814e5f4a506994a9c925eca279"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_travel.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_travel.grid.json",
+   "bytes": 7034,
+   "sha256": "7d9076059239cbd4de210c34d977a7d1dd319976e3b15b258128c7713c6b9307",
+   "daim_commit": "9c04deb",
+   "daim_blob": "bac004700d81c32df348f46c7d5130820919af26"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/layouts/songdo_travelbr.grid.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/layouts/songdo_travelbr.grid.json",
+   "bytes": 8209,
+   "sha256": "0da2fdc39f4cab97ddd9b3c3350effcb57278c97da3290b2fdb9db6408f925ba",
+   "daim_commit": "9c04deb",
+   "daim_blob": "84c3482bc7e70e668d8e7213053c1e4321eed1b8"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_dflp.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_dflp.json",
+   "bytes": 470433,
+   "sha256": "10a07eb52f8e03e3c80a4f7051593f45a44f1d426225af247fdc6ecc711f3b16",
+   "daim_commit": "9c04deb",
+   "daim_blob": "fbb6b0bfdda61f92394c8de67c313f01629e9675"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_dflp_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_dflp_fromto_AGV.csv",
+   "bytes": 751,
+   "sha256": "e51087b4716bcf0f14fd1958e7949ff334a89d7ab80717cbf143f2cd10df1622",
+   "daim_commit": "9c04deb",
+   "daim_blob": "b87e4946ec186060a475fcd700efec0446fa045b"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_dflpbr.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_dflpbr.json",
+   "bytes": 472335,
+   "sha256": "7d541666befb55dbc61bfda14ad0b52fb34ddc7839b24d747615bf7f20dd00d9",
+   "daim_commit": "9c04deb",
+   "daim_blob": "27b123438493aa2a67e604789596ea139b914a06"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_dflpbr_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_dflpbr_fromto_AGV.csv",
+   "bytes": 751,
+   "sha256": "e51087b4716bcf0f14fd1958e7949ff334a89d7ab80717cbf143f2cd10df1622",
+   "daim_commit": "9c04deb",
+   "daim_blob": "b87e4946ec186060a475fcd700efec0446fa045b"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_greedy.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_greedy.json",
+   "bytes": 467434,
+   "sha256": "86379188fd014ab3b06473b8d3196b4e0ace0a3012bfe7212ea2930f101c7fc8",
+   "daim_commit": "9c04deb",
+   "daim_blob": "8f21e483d927f34f211df226df3242f981ece091"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_greedy_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_greedy_fromto_AGV.csv",
+   "bytes": 751,
+   "sha256": "b22cfc785b7e26a8b2378db60340700f5554b5a8ff82b3273c925d7d98b718e0",
+   "daim_commit": "9c04deb",
+   "daim_blob": "67ffa276bbdf5381dface91133404da39307d4b6"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_greedybr.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_greedybr.json",
+   "bytes": 467449,
+   "sha256": "92b2e5d39f83af9e474fc648b2cd4873a2dab65d0b462d2a189c2269963c46b3",
+   "daim_commit": "9c04deb",
+   "daim_blob": "9ef99d6d898d5cf5428dc90e7cf1ec597fdbe072"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_greedybr_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_greedybr_fromto_AGV.csv",
+   "bytes": 751,
+   "sha256": "b22cfc785b7e26a8b2378db60340700f5554b5a8ff82b3273c925d7d98b718e0",
+   "daim_commit": "9c04deb",
+   "daim_blob": "67ffa276bbdf5381dface91133404da39307d4b6"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_joint.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_joint.json",
+   "bytes": 474497,
+   "sha256": "b8ea4e957661f73c74f1b75368d03109bda32eaef0ed1702e52196cb6cfcb661",
+   "daim_commit": "9c04deb",
+   "daim_blob": "0b4d25b908a7920926d0583bdcdbaece28f588af"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_joint_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_joint_fromto_AGV.csv",
+   "bytes": 747,
+   "sha256": "6f3d4cf6fed2a8dd951f85beeb5dbdb147767f551c796e76947063ffa7c9f19d",
+   "daim_commit": "9c04deb",
+   "daim_blob": "96ad28b9fbb1c69f47bcb5ec347a63701dfbeb07"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_manual.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_manual.json",
+   "bytes": 475444,
+   "sha256": "328c2065da3908e7516a8570e7b979ab3c940d9f53d45d9621c7d2c27c0a6920",
+   "daim_commit": "9c04deb",
+   "daim_blob": "903fd863ab8f129c8fff73e53558eb1435587515"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_manual_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_manual_fromto_AGV.csv",
+   "bytes": 749,
+   "sha256": "1aa2eaaccea9d51db213915a76ed38b046ca0373110fb3dec9245f2d1382e282",
+   "daim_commit": "9c04deb",
+   "daim_blob": "7d075737db2d89f7be9ed61d7d8694f898e499ec"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_rand.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_rand.json",
+   "bytes": 465479,
+   "sha256": "f5acf9bc9d294dde4afd298f3688cd6ff025392ab8e58e0938b70d77f1d0678e",
+   "daim_commit": "9c04deb",
+   "daim_blob": "afd1579643c25ce0368f889b7614b50d5e677aa5"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_rand_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_rand_fromto_AGV.csv",
+   "bytes": 751,
+   "sha256": "ef56223399758f691bdafc9acb41cb554b58ac47fcb49525b3412d6fd8aa75c9",
+   "daim_commit": "9c04deb",
+   "daim_blob": "9e5d196e4acb61795239e96049de00e058f3da1e"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_travel.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_travel.json",
+   "bytes": 470016,
+   "sha256": "696aff6837c6edc52dfbdb185a407c9f84e8d6327d7a13c4c2e8a6d9c89a9a86",
+   "daim_commit": "9c04deb",
+   "daim_blob": "f0bee2406eff9f23e99760075ee9bf710ab151e0"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_travel_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_travel_fromto_AGV.csv",
+   "bytes": 751,
+   "sha256": "01410dcace0003de8fb7edf400463401e94b0a38ef141ad00d763fa4bbf488c2",
+   "daim_commit": "9c04deb",
+   "daim_blob": "0e368fcf8723e8cf5123e8f076b83d86a1d001d3"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_travelbr.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_travelbr.json",
+   "bytes": 471387,
+   "sha256": "71890cc7ff303f085cca1d8b4825a7932dc95c0bbd60a1ab2bd670b684c813e6",
+   "daim_commit": "9c04deb",
+   "daim_blob": "f410c64f8c0b6de34bd4f2aeb28e114ba06786e1"
+  },
+  {
+   "path": "daim/experiments/results/songdo_placement_engines/maps/grid_songdo_travelbr_fromto_AGV.csv",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/experiments/results/songdo_placement_engines/maps/grid_songdo_travelbr_fromto_AGV.csv",
+   "bytes": 751,
+   "sha256": "01410dcace0003de8fb7edf400463401e94b0a38ef141ad00d763fa4bbf488c2",
+   "daim_commit": "9c04deb",
+   "daim_blob": "0e368fcf8723e8cf5123e8f076b83d86a1d001d3"
+  },
+  {
+   "path": "daim/tests/data/track_sidings_golden.json",
+   "source": "MAPF/DAIM_simulation/DAIM_simulation/tests/data/track_sidings_golden.json",
+   "bytes": 75934,
+   "sha256": "ef8578fd0c71a7b8e3a265ba94b23ea39c4355099f4758711f575fbe92d2437c",
+   "daim_commit": "9c04deb",
+   "daim_blob": "a7e49d16f5901c7099216aac809d48f642b1e6f5"
+  },
+  {
+   "path": "grid_map/KAIROS_AMR/KAIROS_AMR.map.json",
+   "source": "MAPF/grid_map/KAIROS_AMR/KAIROS_AMR.map.json",
+   "bytes": 44145,
+   "sha256": "90217ef76b552827df2e123499245a81416f9a6c2d5965ad64cbec0b248bcc47"
+  },
+  {
+   "path": "grid_map/KAIROS_AMR/KAIROS_AMR.map_collision.json",
+   "source": "MAPF/grid_map/KAIROS_AMR/KAIROS_AMR.map_collision.json",
+   "bytes": 1176844,
+   "sha256": "90a5e391db67362e204ddc6716110d82a4dd07520dd3776a41b7063561f8c481"
+  },
+  {
+   "path": "grid_map/mini_deadend/mini_deadend_xMSmap.json",
+   "source": "MAPF/grid_map/mini_deadend/mini_deadend_xMSmap.json",
+   "bytes": 65315,
+   "sha256": "397e511ee70fa16a046280c6abfaece4898c9a5504cfd4d570acc7064323bbde"
+  },
+  {
+   "path": "grid_map/random_32_32_20/random_32_32_20_xMSmap.json",
+   "source": "MAPF/grid_map/random_32_32_20/random_32_32_20_xMSmap.json",
+   "bytes": 317136,
+   "sha256": "d9800f336f4219ed2e710e7e887e659db3fc3b37b2b69255c96eeb854b7c60ef"
+  },
+  {
+   "path": "grid_map/songdo_grid_bi_xMSmap.json",
+   "source": "MAPF/grid_map/songdo_grid_bi_xMSmap.json",
+   "bytes": 674082,
+   "sha256": "5bafbd9aee9ee3012adf216a8489d95d44c4abf1f6cf16a0b096a1626fa207f1"
+  }
+ ]
+}

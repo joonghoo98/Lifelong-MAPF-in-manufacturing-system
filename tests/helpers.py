@@ -10,10 +10,10 @@ from agvtb.world.model import World, build_world
 from agvtb.world.states import Conflicts, State, StateGraph
 
 REPO = Path(__file__).resolve().parents[1]
-GRID_MAP = REPO.parent / "grid_map"
+GRID_MAP = REPO / "data" / "grid_map"  # copies of MAPF/grid_map files (data/sources.json)
 CONFIGS = REPO / "configs" / "maps"
 DAIM_CONFIGS = CONFIGS / "daim"  # configs of the nine DAIM songdo maps; their map files stay in DAIM_ENGINES
-DAIM = REPO.parent / "DAIM_simulation" / "DAIM_simulation"
+DAIM = REPO / "data" / "daim"  # copies of DAIM_simulation/DAIM_simulation files at 9c04deb (data/sources.json)
 DAIM_ENGINES = DAIM / "experiments" / "results" / "songdo_placement_engines"
 
 
