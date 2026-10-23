@@ -1,7 +1,8 @@
 """The experiment runner (M5a): runs a list of conditions with run_sim, several at a time, and sums them up.
 
 A condition is a dict {"name", "config", "vehicles", "rate", "seed", "warmup", "measure", "sidings", "fromto"}
-(sidings and fromto may be None). Each run is its own process (python -B -m agvtb.tools.run_sim), writing
+(sidings and fromto may be None), with optional "tail_cut" (missing: run_sim's default, on) and "cut_margin" (0).
+Each run is its own process (python -B -m agvtb.tools.run_sim), writing
 <out>/<name>.json and <out>/<name>.log; a run whose JSON is already there and readable is skipped, so a cut batch
 goes on where it stopped. Only the main thread writes <out>/progress.txt. Exit codes are those of run_sim: 0 ok,
 1 result not ok, 2 usage error, 3 gate refusal.
@@ -43,6 +44,10 @@ def run_argv(cond: dict, out_json: Path) -> list[str]:
         argv += ["--sidings", cond["sidings"]]
     if cond.get("fromto") is not None:
         argv += ["--fromto", cond["fromto"]]
+    if "tail_cut" in cond:
+        argv += ["--tail-cut" if cond["tail_cut"] else "--no-tail-cut"]
+    if cond.get("cut_margin", 0.0):
+        argv += ["--cut-margin", repr(cond["cut_margin"])]
     return argv + ["--out", str(out_json)]
 
 
@@ -65,7 +70,10 @@ def _is_run_of(result: dict, cond: dict) -> bool:
             and result["vehicles"] == cond["vehicles"] and result["rate_per_min"] == cond["rate"]
             and result["seed"] == cond["seed"] and result["warmup_s"] == cond["warmup"]
             and result["measure_s"] == cond["measure"]
-            and (cond.get("sidings") is None or result["sidings_choice"] == cond["sidings"]))
+            and (cond.get("sidings") is None or result["sidings_choice"] == cond["sidings"])
+            # a result from before A2 has no switch: it ran without A2 (M5c)
+            and cond.get("tail_cut", True) == result.get("tail_cut", False)
+            and cond.get("cut_margin", 0.0) == result.get("cut_margin", 0.0))
 
 
 def run_batch(conds: list[dict], out_dir: Path, workers: int, python: str = sys.executable) -> list[dict]:

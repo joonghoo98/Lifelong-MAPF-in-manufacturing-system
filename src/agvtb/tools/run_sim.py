@@ -37,12 +37,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sidings", metavar="CHOICE",
                         help="siding variant, e.g. grid-bridge-s00, strict, list:a,b (default: the config's)")
     parser.add_argument("--fromto", metavar="CSV", help="from-to rate table (default: uniform over the ports)")
+    parser.add_argument("--tail-cut", action=argparse.BooleanOptionalAction, default=True,
+                        help="tail cut A2 (default on; --no-tail-cut turns it off)")
+    parser.add_argument("--cut-margin", type=float, default=0.0, metavar="S",
+                        help="A2: the old plan must leave the splice at now + S or later (default 0)")
     parser.add_argument("--out", metavar="FILE", help="JSON file for the result")
     args = parser.parse_args(argv)
     if args.vehicles < 1:
         parser.error(f"--vehicles must be >= 1, got {args.vehicles}")
     for name, value, ok in (("--rate", args.rate, args.rate >= 0), ("--warmup", args.warmup, args.warmup >= 0),
-                            ("--measure", args.measure, args.measure > 0), ("--dt", args.dt, args.dt > 0)):
+                            ("--measure", args.measure, args.measure > 0), ("--dt", args.dt, args.dt > 0),
+                            ("--cut-margin", args.cut_margin, args.cut_margin >= 0)):
         if not (math.isfinite(value) and ok):
             parser.error(f"{name} is out of range, got {value}")
     if args.budget is not None and args.budget < 1:
@@ -80,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as exc:
             parser.error(f"--fromto: {exc}")
 
-    sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, args.warmup, args.measure, args.dt, args.budget, fromto)
+    sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, args.warmup, args.measure, args.dt, args.budget, fromto,
+                        args.tail_cut, args.cut_margin)
     started = time.perf_counter()
     try:
         result = simulate(lw, candidates, sim_cfg)
@@ -97,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
             "sidings_choice": choice.name, "vehicles": args.vehicles, "rate_per_min": args.rate, "seed": args.seed,
             "warmup_s": args.warmup, "measure_s": args.measure, "dt": args.dt,
             "budget": args.budget if args.budget is not None else SafeTailPlanner.DEFAULT_BUDGET,
-            "fromto": args.fromto, "ok": result.ok, "gate": result.gate.summary(), "kpi": result.kpi,
+            "fromto": args.fromto, "tail_cut": args.tail_cut, "cut_margin": args.cut_margin,
+            "ok": result.ok, "gate": result.gate.summary(), "kpi": result.kpi,
             "deadlock": result.deadlock, "checks": result.checks, "stats": result.stats,
             "events_sha256": result.events_sha256, "n_events": result.n_events, "t_end": result.t_end,
             # for the DAIM st24 comparison (M4c): wall time of the run (a measurement, never an input), the longest

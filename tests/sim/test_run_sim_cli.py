@@ -50,3 +50,18 @@ def test_out_json_has_the_values_the_st24_comparison_needs(tmp_path):  # M4c
     assert longest.t_completed < 841.0  # so a window-only maximum would differ
     assert data["job_max_s"] == longest.t_completed - longest.t_assigned
     assert data["jobs_created"] == len(r.jobs) and data["wall_s"] > 0
+
+
+def test_run_sim_records_the_switch(tmp_path):  # M5c: A2 on by default, --no-tail-cut turns it off
+    base = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--warmup", "0", "--measure", "120"]
+    assert main(base + ["--out", str(tmp_path / "on.json")]) in (0, 1)
+    assert main(base + ["--no-tail-cut", "--cut-margin", "1", "--out", str(tmp_path / "off.json")]) in (0, 1)
+    on, off = (json.loads((tmp_path / f"{n}.json").read_text(encoding="utf-8")) for n in ("on", "off"))
+    assert (on["tail_cut"], on["cut_margin"], off["tail_cut"], off["cut_margin"]) == (True, 0.0, False, 1.0)
+
+
+@pytest.mark.parametrize("margin", ["-1", "nan", "inf"])
+def test_cut_margin_must_be_finite_and_not_negative(margin, capsys):
+    with pytest.raises(SystemExit):
+        main([str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--cut-margin", margin])
+    assert "--cut-margin is out of range" in capsys.readouterr().err

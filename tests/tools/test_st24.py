@@ -52,6 +52,7 @@ def test_st24_conditions_follow_the_summary(tmp_path):
     c = conds[1]
     assert (c["vehicles"], c["rate"], c["seed"], c["warmup"], c["measure"], c["sidings"]) == (15, 3.0, 1, 3600.0, 86400.0, "recorded")
     assert c["config"].endswith("grid_songdo_greedybr.json") and c["fromto"].endswith("grid_songdo_greedybr_fromto_AGV.csv")
+    assert c["tail_cut"] is False  # DAIM's st24 / st24b ran without A2 (M5c: ours is on by default)
     assert Path(c["config"]).is_absolute() and Path(c["fromto"]).is_absolute()  # final review I4: any folder works
 
 
@@ -72,7 +73,7 @@ def test_the_table_counts_passes_and_marks_missing_runs(tmp_path):
 
 
 @pytest.mark.parametrize("wrong", [{"seed": 4}, {"config": "configs/maps/daim/grid_songdo_rand.json"},
-                                   {"fromto": "x/grid_songdo_rand_fromto_AGV.csv"}])
+                                   {"fromto": "x/grid_songdo_rand_fromto_AGV.csv"}, {"tail_cut": True}])
 def test_a_result_of_another_condition_is_refused(tmp_path, wrong):  # the run is the condition it claims to be
     st = fake_st24(tmp_path, ["dflpbr_s5_l1.5"])
     res = tmp_path / "res"

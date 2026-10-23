@@ -34,27 +34,37 @@ def _summary(st24_dir: Path) -> dict[str, dict]:
         return {row["condition"]: row for row in csv.DictReader(fh)}
 
 
+def condition(name: str, configs_dir: Path = Path("configs/maps/daim")) -> dict:
+    """The agvtb.tools.batch condition of an st24 condition name. DAIM's st24 / st24b ran without A2 (M5c)."""
+    engine, seed, lam = parse_condition(name)
+    config = (Path(configs_dir) / f"grid_songdo_{engine}.json").resolve()  # any folder works (final review I4)
+    map_path = load_map_config(config).map_path
+    return {"name": name, "config": str(config), "vehicles": VEHICLES, "rate": lam, "seed": seed,
+            "warmup": WARMUP_S, "measure": MEASURE_S, "sidings": "recorded",
+            "fromto": str(map_path.with_name(f"{map_path.stem}_fromto_AGV.csv").resolve()), "tail_cut": False}
+
+
 def st24_conditions(st24_dir: Path, configs_dir: Path = Path("configs/maps/daim")) -> list[dict]:
     """The conditions of the summary, in its order, as agvtb.tools.batch conditions."""
-    out = []
-    for name in _summary(st24_dir):
-        engine, seed, lam = parse_condition(name)
-        config = (Path(configs_dir) / f"grid_songdo_{engine}.json").resolve()  # any folder works (final review I4)
-        map_path = load_map_config(config).map_path
-        out.append({"name": name, "config": str(config), "vehicles": VEHICLES, "rate": lam, "seed": seed,
-                    "warmup": WARMUP_S, "measure": MEASURE_S, "sidings": "recorded",
-                    "fromto": str(map_path.with_name(f"{map_path.stem}_fromto_AGV.csv").resolve())})
-    return out
+    return [condition(name, configs_dir) for name in _summary(st24_dir)]
 
 
 def daim_record(st24_dir: Path, name: str, summary_row: dict) -> dict:
     """DAIM's values of one condition; asserts they are the window values the summary CSV shows."""
-    d = json.loads((Path(st24_dir) / f"st24_{name}.json").read_text(encoding="utf-8"))
+    return daim_json_record(Path(st24_dir) / f"st24_{name}.json", summary_row)
+
+
+def daim_json_record(path: Path, summary_row: dict | None) -> dict:
+    """DAIM's values of one run record (st24 or the A2 gate: the same verdict / result keys), its rule_stats as "rs";
+    given its summary CSV row, asserts they are the window values the row shows."""
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    name = Path(path).stem
     v, r = d["verdict"], d["result"]
     win, rs, kall = r["window"], r["rule_stats"] or {}, r["kpi_all"]
-    assert abs(float(summary_row["TH_per_h"]) - win["throughput_min"] * 60) < 1e-9, name
-    assert abs(float(summary_row["CT_s"]) - win["avg_cycle_s"]) < 1e-9, name
-    assert abs(float(summary_row["util"]) - win["utilization_agv"]) < 1e-9, name
+    if summary_row is not None:
+        assert abs(float(summary_row["TH_per_h"]) - win["throughput_min"] * 60) < 1e-9, name
+        assert abs(float(summary_row["CT_s"]) - win["avg_cycle_s"]) < 1e-9, name
+        assert abs(float(summary_row["util"]) - win["utilization_agv"]) < 1e-9, name
     assert r["env"]["AGV_SAFE_TAIL_VALIDATE"] == "1", name  # the validator was on: its zero counts mean something
 
     def st(key):
@@ -70,11 +80,12 @@ def daim_record(st24_dir: Path, name: str, summary_row: dict) -> dict:
             "forever": rs.get("safe_tail_event_forever_edges_max"),
             "aisle": (rs.get("safe_tail_map") or {}).get("aisle_size"), "thr_h": win["throughput_min"] * 60, "cycle": win["avg_cycle_s"],
             "deliver": win["avg_deliver_s"], "util": win["utilization_agv"], "completed": win["completed"],
-            "created": kall["completed"] + kall["waiting_loads"] + kall["active_loads"], "wall": v["wall_s"]}
+            "created": kall["completed"] + kall["waiting_loads"] + kall["active_loads"], "wall": v["wall_s"], "rs": rs}
 
 
-def our_record(result: dict, name: str) -> dict:
-    """Our values of one condition; asserts the result is the run of that condition."""
+def our_record(result: dict, name: str, tail_cut: bool = False, cut_margin: float = 0.0) -> dict:
+    """Our values of one condition; asserts the result is the run of that condition, A2 as given (st24: off)."""
+    assert (result.get("tail_cut", False), result.get("cut_margin", 0.0)) == (tail_cut, cut_margin), (name, "A2")
     engine, seed, lam = parse_condition(name)
     want = {"vehicles": VEHICLES, "warmup_s": WARMUP_S, "measure_s": MEASURE_S, "seed": seed, "rate_per_min": lam,
             "sidings_choice": "recorded"}

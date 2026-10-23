@@ -71,3 +71,20 @@ def test_rates_keep_every_digit_and_the_summary_keeps_to_the_conditions(tmp_path
     run_batch([mini("a")], tmp_path, workers=1)
     (tmp_path / "conds.json").write_text(json.dumps([mini("a")]), encoding="utf-8")
     assert [r["name"] for r in summary_rows(tmp_path, ["a"])] == ["a"]
+
+
+def test_a_cut_condition_passes_the_switch_and_resumes_only_its_own(tmp_path):  # M5c; A2 is on by default
+    from agvtb.tools.batch import run_argv
+    out_json = tmp_path / "a.json"
+    assert not {"--tail-cut", "--no-tail-cut", "--cut-margin"} & set(run_argv(mini("a"), out_json))  # old command kept
+    assert "--no-tail-cut" in run_argv(mini("a", tail_cut=False), out_json)
+    on = run_argv(mini("a", tail_cut=True, cut_margin=1.0), out_json)
+    assert "--tail-cut" in on and on[on.index("--cut-margin") + 1] == "1.0"
+    run_batch([mini("a", tail_cut=False)], tmp_path, workers=1)
+    stored = json.loads(out_json.read_text(encoding="utf-8"))
+    assert stored["tail_cut"] is False
+    del stored["tail_cut"], stored["cut_margin"]  # a result from before A2 counts as off
+    out_json.write_text(json.dumps(stored), encoding="utf-8")
+    assert run_batch([mini("a", tail_cut=False)], tmp_path, workers=1)[0]["skipped"] is True
+    assert run_batch([mini("a")], tmp_path, workers=1)[0]["skipped"] is False  # no field: run_sim's default, on
+    assert json.loads(out_json.read_text(encoding="utf-8"))["tail_cut"] is True
