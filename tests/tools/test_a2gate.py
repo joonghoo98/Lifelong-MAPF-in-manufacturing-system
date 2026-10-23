@@ -59,7 +59,7 @@ def test_the_gate_table_puts_both_sides_a2_effect_together(tmp_path):
     (res / "dflpbr_s5_l1.5_cut0.json").write_text(json.dumps(off), encoding="utf-8")
     (res / "dflpbr_s5_l1.5_cut1.json").write_text(json.dumps(on), encoding="utf-8")
     lines = gate_table(gate, res).splitlines()
-    assert lines[0] == "pass ours off 1/1 on 1/1 m1 0/0 · DAIM off 1/1 on 1/1 m1 0/0 (1 conditions, 0 not run)"
+    assert lines[0] == "pass ours off 1/1 on 1/1 m1 0/0 · DAIM off 1/1 on 1/1 m1 0/0 (1 conditions, 0 runs not run)"
     row = next(x for x in lines if x.startswith("| dflpbr_s5_l1.5 |"))
     assert "| -3.00/-3.00 | 20/16 (2·14) | 10/8 (1·7) | 10.0/12.0 | 0/0 |" in row
 
@@ -72,3 +72,21 @@ def test_a_result_with_the_wrong_switch_is_refused(tmp_path):
                                                   encoding="utf-8")
     with pytest.raises(AssertionError):
         gate_table(gate, res)
+
+
+def test_the_gate_table_sums_the_on_runs_and_shows_the_margin_runs(tmp_path):  # final review m-4
+    gate = fake_gate(tmp_path, ["dflpbr_s5_l1.5"], m1=["dflpbr_s5_l1.5"])  # DAIM m1: CT 116.4, port 1
+    res = tmp_path / "res"
+    res.mkdir()
+    base = fake_result(seed=5, lam=1.5)  # 2190 commits
+    for suffix, cut, margin, ct, port in (("cut0", False, 0.0, 118.0, 0), ("cut1", True, 0.0, 114.46, 2),
+                                          ("cut1_m1", True, 1.0, 112.1, 1)):
+        a2 = {"cut_try": 20, "cut_ok": 16, "cut_ok_port": port, "cut_ok_transit": 16 - port, "cut_tail_s": 160.0}
+        r = base | {"tail_cut": cut, "cut_margin": margin, "kpi": base["kpi"] | {"cycle_s": ct},
+                    "stats": base["stats"] | (a2 if cut else {})}
+        (res / f"dflpbr_s5_l1.5_{suffix}.json").write_text(json.dumps(r), encoding="utf-8")
+    lines = gate_table(gate, res).splitlines()
+    assert lines[0] == "pass ours off 1/1 on 1/1 m1 1/1 · DAIM off 1/1 on 1/1 m1 1/1 (1 conditions, 0 runs not run)"
+    assert ("A2 (cut1 runs): ours rate 0.9% · success 80.0% · port 12.5% · tail cut 10.0 s per cut · "
+            "DAIM rate 10.0% · success 80.0% · port 12.5% · tail cut 12.0 s per cut") in lines  # m1 not in the sums
+    assert "| dflpbr_s5_l1.5 | -5.00/-3.00 | 2→1/1→1 | yes/yes |" in lines

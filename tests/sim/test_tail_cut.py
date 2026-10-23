@@ -118,7 +118,18 @@ def test_a_cut_that_does_not_go_through_leaves_the_tapg_as_it_was(mini, monkeypa
 def test_a_cut_claimed_meanwhile_falls_back_to_a1(mini, monkeypatch):  # spec §4-2, §8.1-7
     real, n = Executor.revocable, []
     monkeypatch.setattr(Executor, "revocable", lambda self, vid, k: n.append(1) or (len(n) > 1 and real(self, vid, k)))
+    seen, real_try = [], Simulation._try_cut
+
+    def try_cut(self, t, vid, legs, table):
+        before, n0 = snapshot(self), self.counts["cut_aborted_claimed"]
+        out = real_try(self, t, vid, legs, table)
+        if self.counts["cut_aborted_claimed"] > n0:
+            seen.append((t, vid, snapshot(self) == before))
+        return out
+    monkeypatch.setattr(Simulation, "_try_cut", try_cut)
     r = simulate(*mini, cfg())
+    (t, vid, unchanged), = seen
+    assert unchanged and any(c.t == t and c.vid == vid and not c.cut for c in r.commits)  # as it was, then A1 (m-1)
     assert r.stats["cut_aborted_claimed"] == 1 and r.ok
 
 
@@ -191,3 +202,17 @@ def test_with_a2_the_dispatch_distance_starts_at_the_splice(mini):  # D5: A1 = i
             if found:
                 break
         assert found
+
+
+def test_port_cuts_are_the_ones_at_the_last_tasks_drop_off(mini, on):  # DAIM final review m4; final review I-1
+    graph, last, port = mini[0].graph, {}, 0
+    for c in on.commits:
+        if c.cut:
+            port += c.vid in last and graph[c.start_sid].nodes[0] == last[c.vid]
+        last[c.vid] = c.legs[-1]
+    assert port == on.stats["cut_ok_port"] > 0 and on.stats["cut_ok"] - port == on.stats["cut_ok_transit"] > 0
+
+
+def test_a_margin_no_old_plan_meets_leaves_the_run_as_without_a2(mini):  # the margin reaches the cut and D5 (m-1)
+    r = simulate(*mini, cfg(margin=1e9))
+    assert r.stats["cut_try"] == 0 and r.stats["cut_none"] > 0 and r.events_sha256 == PRE_B_8

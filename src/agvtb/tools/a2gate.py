@@ -151,7 +151,7 @@ def gate_table(gate_dir: Path, results_dir: Path) -> str:
         p = passes[side]
         return f"off {p['cut0'][0]}/{p['cut0'][1]} on {p['cut1'][0]}/{p['cut1'][1]} m1 {p['cut1_m1'][0]}/{p['cut1_m1'][1]}"
 
-    top = f"pass ours {tally('ours')} · DAIM {tally('DAIM')} ({len(bases)} conditions, {not_run} not run)"
+    top = f"pass ours {tally('ours')} · DAIM {tally('DAIM')} ({len(bases)} conditions, {not_run} runs not run)"
     sums = [f"CT Δ% on against off: ours {_stats(deltas['ours'])} · DAIM {_stats(deltas['DAIM'])}",
             f"A2 (cut1 runs): ours {_sums(on_runs['ours'])} · DAIM {_sums(on_runs['DAIM'])}"]
     return "\n".join([top, ""] + lines + [""] + sums + ([""] + m1_lines if len(m1_lines) > 2 else [])) + "\n"
