@@ -93,7 +93,7 @@ def longest_hop(cm: CellMap) -> int:
     return _joined(cm.stations, _hop_list(station_hops(cm, len(cm.cells))))[1]
 
 
-def _components(cm: CellMap, gone: str) -> list[set[str]]:
+def components(cm: CellMap, gone: str) -> list[set[str]]:
     """The components of the cell graph without the cell gone, by their smallest cell id."""
     seen, comps = {gone}, []
     for v in cm.cells:
@@ -134,7 +134,7 @@ def theorem_c(cm: CellMap, rest: Collection[str], n_vehicles: int) -> tuple[str,
         failed.append("C2")
     for s in sorted((rest | cm.port_cells) & cm.cut):
         needs, open_way = [], False
-        for comp in _components(cm, s):
+        for comp in components(cm, s):
             dist = _distances(cm, s, comp)
             need = len(comp) - min(dist[z] for z in comp & stations) + 1
             if need > len(rest & comp):
