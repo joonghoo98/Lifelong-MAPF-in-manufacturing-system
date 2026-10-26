@@ -5,6 +5,9 @@ for each run (user decision G4). Demand is a uniform from-to table over the map'
 one job a minute; --rate is jobs per minute. The gate is checked first; if it refuses, nothing is run or written
 and the exit code is 3. Exit codes: 0 no deadlock and no check finding, 1 a deadlock or a finding, 2 a usage
 error, 3 the gate refused.
+
+With --planner m6 (M6 design §5.1) the vehicles rest on the cells of --rest-rule (default no-cut) and every job
+is a fallback bundle; the M6 gate (Theorem C) is checked instead, no siding variant is read and A2 is off.
 """
 import argparse
 import json
@@ -13,6 +16,7 @@ import time
 from pathlib import Path
 
 from agvtb.planning.gate import GateError
+from agvtb.planning.m6_gate import RULES
 from agvtb.planning.safe_tail import SafeTailPlanner
 from agvtb.sidings.choice import candidates_of, parse_siding_choice
 from agvtb.sim.demand import normalize, read_fromto
@@ -37,12 +41,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sidings", metavar="CHOICE",
                         help="siding variant, e.g. grid-bridge-s00, strict, list:a,b (default: the config's)")
     parser.add_argument("--fromto", metavar="CSV", help="from-to rate table (default: uniform over the ports)")
-    parser.add_argument("--tail-cut", action=argparse.BooleanOptionalAction, default=True,
+    parser.add_argument("--tail-cut", action=argparse.BooleanOptionalAction, default=None,
                         help="tail cut A2 (default on; --no-tail-cut turns it off)")
     parser.add_argument("--cut-margin", type=float, default=0.0, metavar="S",
                         help="A2: the old plan must leave the splice at now + S or later (default 0)")
+    parser.add_argument("--planner", choices=("sl", "m6"), default="sl",
+                        help="sl: sidings, A1 + B + A2 (default); m6: rest cells, every job a fallback bundle")
+    parser.add_argument("--rest-rule", choices=RULES, help="m6 only: the rest cells (default no-cut)")
     parser.add_argument("--out", metavar="FILE", help="JSON file for the result")
     args = parser.parse_args(argv)
+    m6 = args.planner == "m6"
+    if m6 and args.tail_cut is True:
+        parser.error("--tail-cut: m6 does not use A2")
+    if m6 and args.sidings is not None:
+        parser.error("--sidings: m6 rests on the cells of its rest rule, not on sidings")
+    if not m6 and args.rest_rule is not None:
+        parser.error("--rest-rule: only --planner m6 has a rest rule")
+    tail_cut = False if m6 else args.tail_cut is not False
+    rest_rule = (args.rest_rule or "no-cut") if m6 else None
     if args.vehicles < 1:
         parser.error(f"--vehicles must be >= 1, got {args.vehicles}")
     for name, value, ok in (("--rate", args.rate, args.rate >= 0), ("--warmup", args.warmup, args.warmup >= 0),
@@ -61,21 +77,24 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_map_config(args.config)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
-    text = args.sidings if args.sidings is not None else cfg.sidings
-    if text is None:
-        parser.error(f"{args.config}: no siding variant; give --sidings or a \"sidings\" key in the config")
-    try:
-        choice = parse_siding_choice(text)
-    except ValueError as exc:
-        parser.error(str(exc))
+    choice, candidates = None, ()
+    if not m6:
+        text = args.sidings if args.sidings is not None else cfg.sidings
+        if text is None:
+            parser.error(f"{args.config}: no siding variant; give --sidings or a \"sidings\" key in the config")
+        try:
+            choice = parse_siding_choice(text)
+        except ValueError as exc:
+            parser.error(str(exc))
     try:
         lw = load_world(args.config)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
-    try:
-        candidates = candidates_of(lw, choice)
-    except ValueError as exc:
-        parser.error(str(exc))
+    if not m6:
+        try:
+            candidates = candidates_of(lw, choice)
+        except ValueError as exc:
+            parser.error(str(exc))
     if len(set(lw.world.port_nodes)) < 2:
         parser.error(f"{lw.world.name}: a job needs two ports, the map has {sorted(set(lw.world.port_nodes))}")
     fromto = None
@@ -86,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--fromto: {exc}")
 
     sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, args.warmup, args.measure, args.dt, args.budget, fromto,
-                        args.tail_cut, args.cut_margin)
+                        tail_cut, args.cut_margin, args.planner, rest_rule or "no-cut")
     started = time.perf_counter()
     try:
         result = simulate(lw, candidates, sim_cfg)
@@ -100,10 +119,11 @@ def main(argv: list[str] | None = None) -> int:
         spans = [j.t_completed - j.t_assigned for j in result.jobs if j.t_completed is not None]
         data = {
             "config": str(args.config), "map": lw.world.name, "map_sha256": lw.map_sha256,
-            "sidings_choice": choice.name, "vehicles": args.vehicles, "rate_per_min": args.rate, "seed": args.seed,
+            "sidings_choice": choice.name if choice else None, "vehicles": args.vehicles, "rate_per_min": args.rate, "seed": args.seed,
             "warmup_s": args.warmup, "measure_s": args.measure, "dt": args.dt,
             "budget": args.budget if args.budget is not None else SafeTailPlanner.DEFAULT_BUDGET,
-            "fromto": args.fromto, "tail_cut": args.tail_cut, "cut_margin": args.cut_margin,
+            "fromto": args.fromto, "tail_cut": tail_cut, "cut_margin": args.cut_margin,
+            "planner": args.planner, "rest_rule": rest_rule,
             "ok": result.ok, "gate": result.gate.summary(), "kpi": result.kpi,
             "deadlock": result.deadlock, "checks": result.checks, "stats": result.stats,
             "events_sha256": result.events_sha256, "n_events": result.n_events, "t_end": result.t_end,
@@ -111,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
             # assignment-to-completion of any job in the whole run (st24's job_assign_to_done_max_s), jobs created
             "wall_s": wall_s, "job_max_s": max(spans) if spans else None, "jobs_created": len(result.jobs),
         }
+        if m6:
+            data["m6"] = result.m6
         Path(args.out).write_text(json.dumps(data), encoding="utf-8")
     findings = sum(len(found) for found in result.checks.values())
     d = result.deadlock

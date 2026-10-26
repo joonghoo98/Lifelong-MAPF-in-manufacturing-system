@@ -48,6 +48,10 @@ def run_argv(cond: dict, out_json: Path) -> list[str]:
         argv += ["--tail-cut" if cond["tail_cut"] else "--no-tail-cut"]
     if cond.get("cut_margin", 0.0):
         argv += ["--cut-margin", repr(cond["cut_margin"])]
+    if cond.get("planner", "sl") != "sl":
+        argv += ["--planner", cond["planner"]]
+    if cond.get("rest_rule") is not None:
+        argv += ["--rest-rule", cond["rest_rule"]]
     return argv + ["--out", str(out_json)]
 
 
@@ -66,13 +70,16 @@ def _same_file(a: str | None, b: str | None) -> bool:
 
 def _is_run_of(result: dict, cond: dict) -> bool:
     """The stored result is the run of this condition (final review I1: a name alone proves nothing)."""
+    planner = cond.get("planner", "sl")  # a result from before M6 has no planner key: it ran sl
     return (_same_file(result["config"], cond["config"]) and _same_file(result["fromto"], cond.get("fromto"))
             and result["vehicles"] == cond["vehicles"] and result["rate_per_min"] == cond["rate"]
             and result["seed"] == cond["seed"] and result["warmup_s"] == cond["warmup"]
             and result["measure_s"] == cond["measure"]
             and (cond.get("sidings") is None or result["sidings_choice"] == cond["sidings"])
-            # a result from before A2 has no switch: it ran without A2 (M5c)
-            and cond.get("tail_cut", True) == result.get("tail_cut", False)
+            and planner == result.get("planner", "sl")
+            and (cond.get("rest_rule", "no-cut") if planner == "m6" else None) == result.get("rest_rule")
+            # a result from before A2 has no switch: it ran without A2 (M5c); m6 never uses A2
+            and cond.get("tail_cut", planner == "sl") == result.get("tail_cut", False)
             and cond.get("cut_margin", 0.0) == result.get("cut_margin", 0.0))
 
 

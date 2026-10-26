@@ -88,3 +88,21 @@ def test_a_cut_condition_passes_the_switch_and_resumes_only_its_own(tmp_path):  
     assert run_batch([mini("a", tail_cut=False)], tmp_path, workers=1)[0]["skipped"] is True
     assert run_batch([mini("a")], tmp_path, workers=1)[0]["skipped"] is False  # no field: run_sim's default, on
     assert json.loads(out_json.read_text(encoding="utf-8"))["tail_cut"] is True
+
+
+def test_an_m6_condition_passes_its_planner_and_resumes_only_its_own(tmp_path):
+    from agvtb.tools.batch import run_argv
+    out_json = tmp_path / "a.json"
+    assert "--planner" not in run_argv(mini("a"), out_json)  # the sl command stays as it was
+    argv = run_argv(mini("a", planner="m6", rest_rule="branch"), out_json)
+    assert argv[argv.index("--planner") + 1] == "m6" and argv[argv.index("--rest-rule") + 1] == "branch"
+    run_batch([mini("a", planner="m6", rest_rule="branch")], tmp_path, workers=1)
+    stored = json.loads(out_json.read_text(encoding="utf-8"))
+    assert (stored["planner"], stored["rest_rule"], stored["tail_cut"]) == ("m6", "branch", False)
+    assert run_batch([mini("a", planner="m6", rest_rule="branch")], tmp_path, workers=1)[0]["skipped"] is True
+    assert run_batch([mini("a", planner="m6")], tmp_path, workers=1)[0]["skipped"] is False  # no-cut: another run
+    assert run_batch([mini("a")], tmp_path, workers=1)[0]["skipped"] is False  # an sl condition: another run
+    stored = json.loads(out_json.read_text(encoding="utf-8"))
+    del stored["planner"], stored["rest_rule"]  # a result from before M6 ran sl
+    out_json.write_text(json.dumps(stored), encoding="utf-8")
+    assert run_batch([mini("a")], tmp_path, workers=1)[0]["skipped"] is True

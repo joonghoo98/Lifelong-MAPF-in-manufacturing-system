@@ -65,3 +65,38 @@ def test_cut_margin_must_be_finite_and_not_negative(margin, capsys):
     with pytest.raises(SystemExit):
         main([str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--cut-margin", margin])
     assert "--cut-margin is out of range" in capsys.readouterr().err
+
+
+KAIROS = str(CONFIGS / "KAIROS_AMR.json")
+
+
+def test_cli_runs_m6_and_records_the_mode(tmp_path):
+    out = tmp_path / "m6.json"
+    code = main([KAIROS, "--vehicles", "20", "--rate", "1", "--warmup", "0", "--measure", "300", "--planner", "m6",
+                 "--rest-rule", "branch", "--out", str(out)])
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert code in (0, 1)
+    assert (data["planner"], data["rest_rule"], data["tail_cut"], data["sidings_choice"]) == ("m6", "branch", False, None)
+    assert data["gate"]["ok"] and data["gate"]["rule"] == "branch" and "slow_jobs" in data["m6"]
+
+
+def test_cli_m6_gate_refusal_writes_nothing(tmp_path):
+    out = tmp_path / "x.json"
+    argv = [KAIROS, "--vehicles", "27", "--rate", "1", "--planner", "m6", "--rest-rule", "branch", "--out", str(out)]
+    assert main(argv) == 3 and not out.exists()
+
+
+@pytest.mark.parametrize("extra", [["--planner", "m6", "--tail-cut"], ["--planner", "m6", "--sidings", "strict"],
+                                   ["--rest-rule", "branch"]])
+def test_cli_m6_usage_errors(extra):  # plan decision 5
+    with pytest.raises(SystemExit) as exc:
+        main([KAIROS, "--vehicles", "4", "--rate", "1"] + extra)
+    assert exc.value.code == 2
+
+
+def test_an_sl_result_names_its_planner(tmp_path):
+    out = tmp_path / "sl.json"
+    main([str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--warmup", "0", "--measure", "120",
+          "--out", str(out)])
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert (data["planner"], data["rest_rule"], data["tail_cut"]) == ("sl", None, True) and "m6" not in data
