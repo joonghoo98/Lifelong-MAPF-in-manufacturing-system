@@ -11,13 +11,16 @@ import hashlib
 import json
 import random
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from agvtb.planning.gate import GateError, GateReport, check_gate
 from agvtb.planning.intervals import INF
 from agvtb.planning.ledger import SidingLedger
+from agvtb.planning.m6_fallback import M6Fallback
+from agvtb.planning.m6_gate import check_m6_gate, rest_cells
 from agvtb.planning.offline import initial_stop
 from agvtb.planning.reservations import affects, path_constraints
+from agvtb.planning.rest_ledger import RestLedger
 from agvtb.planning.safe_tail import SafeTailPlanner, reverse_times, tail_cut_index
 from agvtb.sim.demand import Demand, normalize, uniform_fromto
 from agvtb.sim.executor import Executor, wait_cycles, world_geometry
@@ -27,6 +30,7 @@ from agvtb.sim.tapg import Tapg
 from agvtb.validate.events import event_graph, first_cycle
 from agvtb.validate.plans import (early_fallback, live_entries, pairwise_overlaps, path_vs_entries, tail_violations,
                                   task_order_violation, unprotected)
+from agvtb.world.cells import build_cell_map
 from agvtb.world.loader import LoadedWorld
 from agvtb.world.states import geom_key
 
@@ -46,6 +50,8 @@ class SimConfig:
     fromto: Mapping[tuple[str, str], float] | None = None
     tail_cut: bool = True  # tail cut A2, on by default (user decision 2026-10-23, design §9)
     cut_margin: float = 0.0  # A2: the old plan must leave the splice at now + margin or later (seconds)
+    planner: str = "sl"  # "sl" (sidings, A1 + B + A2) or "m6" (rest cells, fallback bundles; M6 design §5.1)
+    rest_rule: str = "no-cut"  # m6: the rest rule (no-cut, branch or all)
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,8 @@ class Commit:
     moving: bool  # the vehicle was still running its earlier path when this one was committed
     fallback: bool
     cut: bool = False  # planned from the splice of its tail (A2)
+    bundle: int = -1  # m6: the number of the bundle this commit belongs to
+    evict: bool = False  # m6: the vehicle was moved for another vehicle's job
 
 
 @dataclass(frozen=True)
@@ -72,6 +80,7 @@ class SimResult:
     t_end: float
     jobs: list[Job]
     commits: list[Commit]
+    m6: dict | None = None  # m6: the rest rule and the slow jobs (M6Mode.report)
 
     @property
     def ok(self) -> bool:
@@ -131,17 +140,33 @@ class Simulation:
         self.graph, self.conflicts, world = loaded.graph, loaded.conflicts, loaded.world
         self.world = world
         self.end = cfg.warmup_s + cfg.measure_s
-        self.gate = check_gate(self.graph, self.conflicts, world.port_nodes, candidates, cfg.n_vehicles)
-        if not self.gate.ok:
-            raise GateError(self.gate)
-        self.sidings = list(self.gate.sidings)
+        self.m6 = None
+        if cfg.planner == "m6":
+            cells = build_cell_map(world, self.graph, self.conflicts)
+            self.gate = check_m6_gate(cells, cfg.rest_rule, cfg.n_vehicles)
+            if not self.gate.ok:
+                raise GateError(self.gate)
+            rest = rest_cells(cells, cfg.rest_rule)
+            self.cfg = cfg = replace(cfg, tail_cut=False)  # m6 never uses A2 (M6 design §5.1)
+            self.sidings = []
+        elif cfg.planner == "sl":
+            self.gate = check_gate(self.graph, self.conflicts, world.port_nodes, candidates, cfg.n_vehicles)
+            if not self.gate.ok:
+                raise GateError(self.gate)
+            self.sidings = list(self.gate.sidings)
+        else:
+            raise ValueError(f"planner must be sl or m6, got {cfg.planner!r}")
         self.kernel = Kernel()
         self.tapg = Tapg(self.graph, self.conflicts)
         self.events: list[tuple] = []
         self.executor = Executor(self.graph, self.tapg, self.kernel, world_geometry(world), world.accel_mps2,
                            world.decel_mps2, self._on_advance, self._on_exec_event)
-        self.planner = SafeTailPlanner(self.graph, self.conflicts, self.sidings, budget=cfg.budget)
-        self.ledger = SidingLedger(self.sidings)
+        if cfg.planner == "m6":
+            self.planner = M6Fallback(self.graph, self.conflicts, cells, rest, cfg.n_vehicles)
+            self.ledger, pool = RestLedger(rest), list(rest)
+        else:
+            self.planner = SafeTailPlanner(self.graph, self.conflicts, self.sidings, budget=cfg.budget)
+            self.ledger, pool = SidingLedger(self.sidings), self.sidings
         vids = list(range(cfg.n_vehicles))
         self.mcs = Mcs(self.kernel, world.dwell_s, vids, self._dist, self._dispatch, self._on_complete)
         fromto = uniform_fromto(world.port_nodes) if cfg.fromto is None else normalize(cfg.fromto)
@@ -169,7 +194,7 @@ class Simulation:
         self.last_completion = 0.0
         self.n_completed = 0
         self.frozen = False
-        starts = random.Random(cfg.seed).sample(self.sidings, cfg.n_vehicles)
+        starts = random.Random(cfg.seed).sample(pool, cfg.n_vehicles)  # m6: a cell id is a node of the cell
         for vid, siding in zip(vids, starts):
             self.ledger.assign(vid, siding)
             self.tapg.add_vehicle(vid, initial_stop(self.graph, siding), 0.0)
@@ -177,6 +202,9 @@ class Simulation:
         for t, src in self.demand.first_arrivals():
             self.kernel.schedule(t, MCS, self._arrival, src)
         self.kernel.schedule(FREEZE_S, MCS, self._freeze_check, 0)
+        if cfg.planner == "m6":
+            from agvtb.sim.m6_mode import M6Mode  # here, not at the top: m6_mode imports this module
+            self.m6 = M6Mode(self, cells, rest)
 
     # --- logging -----------------------------------------------------------------------------------------------
     def _log(self, t: float, kind: str, who: int, data: tuple = ()) -> None:
@@ -302,6 +330,9 @@ class Simulation:
         cons = live_constraints(self.tapg, self.executor, t)
         n0 = self.counts["commits"]
         for _dt, vid in tasks:
+            if self.m6 is not None:
+                self.m6.plan_and_commit(t, vid, self.pending[vid], cons)
+                continue
             legs = self.pending[vid]
             path = self.tapg.paths[vid]
             table = _table(cons, vid)
@@ -524,7 +555,8 @@ class Simulation:
         stats = dict(sorted(self.planner.stats.items())) | self.counts | {"stray_arrivals": self.mcs.stray_arrivals}
         blob = json.dumps(self.events, separators=(",", ":")).encode()
         return SimResult(self.gate, self.kpi(w0, t_end), self._deadlock(t_end, w0), self.checks, stats,
-                         hashlib.sha256(blob).hexdigest(), len(self.events), t_end, self.mcs.jobs, self.commits)
+                         hashlib.sha256(blob).hexdigest(), len(self.events), t_end, self.mcs.jobs, self.commits,
+                         self.m6.report(w0, t_end) if self.m6 is not None else None)
 
     def kpi(self, w0: float, t: float) -> dict:
         """KPIs of the window [w0, t], as DAIM's runner measures them after its warm-up (research §F2): jobs

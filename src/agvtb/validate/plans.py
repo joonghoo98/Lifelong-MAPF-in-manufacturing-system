@@ -171,6 +171,31 @@ def tail_violations(
     return out
 
 
+def rest_tail_violations(
+    paths: Mapping[int, Sequence[tuple[str, float]]], homes: Mapping[int, str], cell_of: Mapping[str, str],
+    rest: Iterable[str]
+) -> list[str]:
+    """m6's tails (M6 design §5.9): every path ends on a stop in its vehicle's own rest cell, and no rest cell has
+    two owners. cell_of maps a node to its cell."""
+    rest_set = {str(c) for c in rest}
+    out = []
+    for vehicle, p in sorted(paths.items()):
+        if not p:
+            continue
+        sid = p[-1][0]
+        node = sid.split(",")[1] if "," in sid else sid
+        cell = cell_of.get(node)
+        if not sid.startswith("S,"):
+            out.append(f"vehicle {vehicle}: its path ends on {sid}, which is no stop state")
+        elif cell not in rest_set:
+            out.append(f"vehicle {vehicle}: its path ends at {node} in cell {cell}, which is no rest cell")
+        elif homes.get(vehicle) != cell:
+            out.append(f"vehicle {vehicle}: its path ends in cell {cell}, not in its own rest cell {homes.get(vehicle)}")
+    dup = [c for c, n in collections.Counter(homes.values()).items() if n > 1]
+    out += [f"cell {c}: owned by more than one vehicle" for c in sorted(dup)]
+    return out
+
+
 def task_order_violation(path: Sequence[tuple[str, float]], legs: Sequence[str], sidings: Iterable[str]) -> str | None:
     """None if path loads and unloads at legs in order and ends on a siding's stop; else what is wrong."""
     j = 0

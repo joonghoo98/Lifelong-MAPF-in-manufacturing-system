@@ -5,7 +5,8 @@ import agvtb.validate.plans as plans_module
 from agvtb.planning.reservations import ReservationTable
 from agvtb.planning.safe_tail import SafeTailPlanner
 from agvtb.validate.plans import (conflicting, early_fallback, live_entries, occupancy, pairwise_overlaps,
-                                  path_vs_entries, tail_violations, task_order_violation, unprotected)
+                                  path_vs_entries, rest_tail_violations, tail_violations, task_order_violation,
+                                  unprotected)
 from helpers import fake_room_with_spurs
 
 INF = float("inf")
@@ -113,3 +114,11 @@ def test_unprotected_finds_conflicting_states_with_no_order():  # DAIM plan_vali
     assert unprotected(mine, others, lambda n: set(), conflicts) == [
         {"i": 0, "b": 2, "j": 0, "sa": "S,c10,0", "sb": "M,c20,c10"}]
     assert unprotected(mine, others, lambda n: {"b"}, conflicts) == []
+
+
+def test_rest_tail_violations_name_each_broken_tail():
+    paths = {0: [("S,a1,0", 0.0)], 1: [("S,b,0", 0.0), ("M,b,c", 1.0)], 2: [("S,c1,0", 0.0)], 3: [("S,a2,90", 0.0)]}
+    homes = {0: "A", 1: "B", 2: "C", 3: "A"}
+    cell_of = {"a1": "A", "a2": "A", "b": "B", "c": "B", "c1": "C"}
+    found = rest_tail_violations(paths, homes, cell_of, {"A", "B"})
+    assert [f.split(":")[0] for f in found] == ["vehicle 1", "vehicle 2", "cell A"]
