@@ -96,14 +96,17 @@ class M6Mode:
 
     def _overlaps(self, t: float, b: Bundle) -> bool:
         """Does a member's new path collide with what another vehicle will hold (its live entries, a member's with its
-        new path joined on)? The same look as _check's plan_overlaps, made before the bundle goes on. The fallback
-        bundle has its own (M6Fallback.plan)."""
+        new path joined on)? The same look as _check's plan_overlaps, made before the bundle goes on, so a finished
+        member is read where kick will put it: on its stop, not one past it. The fallback bundle has its own
+        (M6Fallback.plan)."""
         sim = self.sim
         tapg, executor = sim.tapg, sim.executor
         held = {}
         for w in sorted(tapg.paths):
+            v = executor.vehicles[w]
+            idx = max(0, v.path_idx - 1) if w in b.paths and v.state == "DONE" else v.path_idx  # executor.py:82
             whole = tapg.paths[w][:-1] + b.paths[w] if w in b.paths else tapg.paths[w]
-            held[w] = live_entries(whole, executor.vehicles[w].path_idx, executor.vehicles[w].claim_idx, t)
+            held[w] = live_entries(whole, idx, v.claim_idx, t)
         return any(path_vs_entries(b.paths[u], {w: es for w, es in held.items() if w != u}, sim.conflicts)
                    for u in b.order)
 

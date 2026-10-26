@@ -111,6 +111,15 @@ def test_an_overlapping_fast_bundle_goes_to_the_fallback(kairos, monkeypatch):  
     clean(r)  # the overlap never went on the TAPG
 
 
+def test_a_bundle_with_a_finished_member_is_not_sent_back():  # R30 acceptance: I2 looked before kick
+    # a finished member's index is one past its stop until kick moves it back (executor.py:82); read before that, its
+    # first new state was held from now on, and clean bundles went to the fallback (the first here at t = 687 s)
+    r = simulate(load_world(CONFIGS / "mini_deadend.json"), (),
+                 SimConfig(40, 1.0, warmup_s=0.0, measure_s=1800.0, planner="m6", rest_rule="no-cut"))
+    clean(r)
+    assert r.stats["m6_fast_ok"] >= 1 and r.stats["m6_fast_overlap"] == 0
+
+
 def test_the_sl_mode_has_no_fast_path_counts():  # G4 (passes before M6b too: it guards the default mode)
     lw = load_world(CONFIGS / "mini_deadend.json")
     r = simulate(lw, candidates_of(lw, parse_siding_choice("grid-bridge-s00")),
