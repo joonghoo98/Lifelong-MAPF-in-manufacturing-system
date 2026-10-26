@@ -3,6 +3,9 @@ import hashlib
 import json
 from pathlib import Path
 
+from agvtb.planning.offline import initial_stop
+from agvtb.planning.reservations import path_constraints
+from agvtb.world.cells import build_cell_map
 from agvtb.world.config import load_map_config
 from agvtb.world.loader import LoadedWorld, load_world
 from agvtb.world.mapfile import load_xmsmap
@@ -259,3 +262,61 @@ def split_config(tmp_path) -> Path:
     """Two two-way links a-b and c-d, 5 m apart and not joined: a map in two parts. Returns the config path."""
     nodes = {"a": (0.0, 0.0), "b": (1.0, 0.0), "c": (0.0, 5.0), "d": (1.0, 5.0)}
     return link_config(tmp_path, nodes, [("a", "b"), ("c", "d")], ["a", "d"], "split")
+
+
+EVICT_MAPS = {  # name -> (nodes {id: (x, y)}, two-way links, ports); 1 m grid maps of the M6b plan, Tasks 1-3
+    "loop": ({"A": (0, 0), "B": (1, 0), "S": (0, 1), "T": (1, 1), "P": (2, 0), "U": (3, 0)},
+             [("A", "B"), ("A", "S"), ("S", "T"), ("T", "B"), ("B", "P"), ("P", "U")], ["P", "U"]),
+    "ce1": ({"A": (0, 0), "X": (1, 0), "M": (2, 0), "N": (3, 0), "Y1": (0, 1), "Y2": (0, 2), "Y3": (1, 2),
+             "Y4": (2, 2), "Y5": (2, 1)},
+            [("A", "X"), ("X", "M"), ("M", "N"), ("A", "Y1"), ("Y1", "Y2"), ("Y2", "Y3"), ("Y3", "Y4"), ("Y4", "Y5"),
+             ("Y5", "M")], ["N"]),
+    "fork": ({"E": (1, 0), "J": (0, 0), "F": (0, 1), "G": (0, -1), "G2": (0, -2)},
+             [("J", "E"), ("J", "F"), ("J", "G"), ("G", "G2")], ["E"]),
+    "deadend": ({"v0": (0, 1), "v1": (0, 0), "v2": (1, 0), "v3": (2, 0), "v4": (3, 0), "o1": (-1, 0), "o2": (-2, 0),
+                 "o3": (-1, -1)},
+                [("v0", "v1"), ("v1", "v2"), ("v2", "v3"), ("v3", "v4"), ("v1", "o1"), ("o1", "o2"), ("o1", "o3")],
+                ["v4", "o2"]),
+    "chain": ({"J": (0, 0), "A": (1, 0), "B": (2, 0), "C": (3, 0), "D": (4, 0), "E": (5, 0), "F": (0, 1),
+               "G": (0, -1), "H": (-1, 0), "U": (-2, 0), "W": (-1, 1)},
+              [("J", "A"), ("A", "B"), ("B", "C"), ("C", "D"), ("D", "E"), ("J", "F"), ("J", "G"), ("J", "H"),
+               ("H", "U"), ("H", "W")], ["E", "U"]),
+    "tail": ({"R0": (0, 0), "L1": (1, 0), **{f"c{i}": (1 + i, 0) for i in range(1, 13)}, "U": (14, 0), "D": (15, 0)},
+             [("R0", "L1"), ("L1", "c1"), *[(f"c{i}", f"c{i + 1}") for i in range(1, 12)], ("c12", "U"), ("U", "D")],
+             ["L1", "U"]),
+}
+
+
+def evict_world(tmp_path, name: str):
+    """(LoadedWorld, CellMap) of EVICT_MAPS[name]; every node is a cell of its own."""
+    nodes, links, ports = EVICT_MAPS[name]
+    lw = load_world(link_config(tmp_path, {n: (float(x), float(y)) for n, (x, y) in nodes.items()}, links, ports, name))
+    cm = build_cell_map(lw.world, lw.graph, lw.conflicts)
+    assert len(cm.cells) == len(nodes)
+    return lw, cm
+
+
+def rest_at(lw, node: str, t: float = 0.0) -> list[tuple[str, float]]:
+    """A path that is one stop at node from t: a vehicle resting there."""
+    return [(initial_stop(lw.graph, node), t)]
+
+
+def cells_of(cm, *nodes: str) -> tuple[str, ...]:
+    return tuple(sorted({cm.cell_of[n] for n in nodes}))
+
+
+def facing(lw, node: str, to: str) -> str:
+    """The stop at node that can leave straight for the neighbour to."""
+    g, mv = lw.graph, f"M,{node},{to}"
+    return next(s for s in sorted(g) if g[s].kind == "S" and mv in g[s].next)
+
+
+def occupancy_of(lw, cm, rest, paths, now: float = 0.0, extra=None):
+    """(Occupancy, cons, ends, homes) of vehicles on paths {v: path}, each ending on its rest, plus raw entries
+    extra {v: [(key, lo, hi)]} of vehicles that have no path."""
+    from agvtb.planning.occupancy import Occupancy  # here: the other tests import helpers before Task 1 exists
+    cons = {v: path_constraints(p, lw.graph, lw.conflicts) for v, p in paths.items()} | (extra or {})
+    ends = {v: p[-1] for v, p in paths.items()}
+    homes = {v: cm.cell_of[lw.graph[p[-1][0]].nodes[0]] for v, p in paths.items()}
+    occ = Occupancy.from_sim(lw.graph, lw.conflicts, cm, rest, now, cons, ends, homes)
+    return occ, cons, ends, homes
