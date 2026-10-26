@@ -8,14 +8,41 @@ Theorem C (R26 §3; its T1..T4 are C1..C4 here) lets idle vehicles rest on the c
       station of C), or blocking them all takes more than N - 1 idle vehicles;
   C4  every port cell that is a cut cell lies within V - N edges of a station.
 V is the number of cells and N the number of vehicles. The verdicts are those of R26 check_c.theorem_c.
+The theorems also assume a map of two-way segments that join all its nodes (design §3); map_assumptions checks
+that first, and a map that breaks it is refused before its cells are built.
 """
 from collections import deque
 from collections.abc import Collection
 from dataclasses import dataclass
 
 from agvtb.world.cells import CellMap, dead_end_cells
+from agvtb.world.model import World
 
 RULES = ("no-cut", "branch", "all")
+
+
+def map_assumptions(world: World) -> tuple[str, ...]:
+    """The assumptions of the theorems that the map breaks (design §3), each starting "map: ": every segment has
+    its reverse, and the segments join all nodes. Empty when both hold."""
+    out = []
+    one_way = sorted((u, v) for u, v in world.segments if (v, u) not in world.segments)
+    if one_way:
+        out.append(f"map: {len(one_way)} one-way segments, first {one_way[:3]}")
+    nbrs: dict[str, set[str]] = {n: set() for n in world.nodes}
+    for u, v in world.segments:
+        nbrs[u].add(v)
+        nbrs[v].add(u)
+    nodes = sorted(world.nodes)
+    seen, todo = set(nodes[:1]), nodes[:1]
+    while todo:
+        for u in sorted(nbrs[todo.pop()]):
+            if u not in seen:
+                seen.add(u)
+                todo.append(u)
+    if len(seen) < len(nodes):
+        out.append(f"map: the node graph is not connected: {len(nodes) - len(seen)} of {len(nodes)} nodes are not "
+                   f"joined to {nodes[0]}")
+    return tuple(out)
 
 
 def rest_cells(cm: CellMap, rule: str) -> tuple[str, ...]:
@@ -161,14 +188,15 @@ class M6GateReport:
     n_rest: int
     longest_hop: int
     failed: tuple[str, ...]
+    map_violations: tuple[str, ...] = ()  # map_assumptions; when there are some, no cells were built
 
     @property
     def ok(self) -> bool:
-        return not self.failed
+        return not self.failed and not self.map_violations
 
     @property
     def violations(self) -> tuple[str, ...]:
-        """One line per failed condition, in order, each starting with "Cn: "."""
+        """The map's broken assumptions ("map: ..."), then one line per failed condition, each starting "Cn: "."""
         room = self.n_cells - self.n_vehicles
         text = {
             "C1": f"{self.n_rest} rest cells for {self.n_vehicles} vehicles, or none of them is a station",
@@ -176,7 +204,7 @@ class M6GateReport:
             "C3": f"a vehicle on a cut cell can be walled in by the other {self.n_vehicles - 1} vehicles",
             "C4": f"a port on a cut cell is more than {room} edges from every station",
         }
-        return tuple(f"{c}: {text[c]}" for c in self.failed)
+        return self.map_violations + tuple(f"{c}: {text[c]}" for c in self.failed)
 
     def summary(self) -> dict:
         """The report as plain data."""

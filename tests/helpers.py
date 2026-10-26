@@ -244,3 +244,18 @@ SMALL_GRAPHS = {  # name -> (adjacency, ports); R26 verdicts: plans/2026-10-24-m
     "longlane": (_undirected([("0", "1"), ("1", "2"), ("2", "0"), ("0", "3"), ("3", "4"), ("4", "5"), ("5", "6"),
                               ("6", "7"), ("7", "8")]), ("1", "5")),
 }
+
+
+def one_way_tiny_config(tmp_path) -> Path:
+    """The tiny map (see tiny_config) without its segment C -> B: B -> C is one-way. Returns the config path."""
+    path = tiny_config(tmp_path)
+    data = json.loads((tmp_path / "tiny_map.json").read_text(encoding="utf-8"))
+    data["segments"] = [s for s in data["segments"] if (s["startNodeId"], s["endNodeId"]) != ("C", "B")]
+    (tmp_path / "tiny_map.json").write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def split_config(tmp_path) -> Path:
+    """Two two-way links a-b and c-d, 5 m apart and not joined: a map in two parts. Returns the config path."""
+    nodes = {"a": (0.0, 0.0), "b": (1.0, 0.0), "c": (0.0, 5.0), "d": (1.0, 5.0)}
+    return link_config(tmp_path, nodes, [("a", "b"), ("c", "d")], ["a", "d"], "split")

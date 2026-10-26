@@ -1,9 +1,10 @@
 import pytest
 
-from agvtb.planning.m6_gate import RULES, check_m6_gate, longest_hop, rest_cells, station_hops, theorem_c
+from agvtb.planning.m6_gate import (RULES, check_m6_gate, longest_hop, map_assumptions, rest_cells, station_hops,
+                                    theorem_c)
 from agvtb.world.cells import build_cell_map, cell_map_from_graph
 from agvtb.world.loader import load_world
-from helpers import CONFIGS, SMALL_GRAPHS
+from helpers import CONFIGS, SMALL_GRAPHS, one_way_tiny_config, split_config, world_of_config
 
 REFERENCE = [  # (graph, rule, N, failed): R26 check_c.theorem_c (ref_cases.out.txt), its T1..T4 being C1..C4
     ("lollipop", "branch", 3, ()), ("lollipop", "branch", 4, ("C2",)), ("lollipop", "branch", 5, ("C1", "C2")),
@@ -69,3 +70,13 @@ def test_bad_inputs():
         check_m6_gate(cm, "branch", 0)
     with pytest.raises(ValueError):
         rest_cells(cm, "loop")
+
+
+def test_the_map_assumptions(tmp_path):  # final review I1, M1: the theorems want two-way segments and one map
+    assert all(map_assumptions(load_world(CONFIGS / f"{name}.json").world) == () for name in sorted(MAP_REST))
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    one_way = map_assumptions(world_of_config(one_way_tiny_config(tmp_path / "a")))
+    split = map_assumptions(world_of_config(split_config(tmp_path / "b")))
+    assert len(one_way) == 1 and one_way[0].startswith("map: ") and "('B', 'C')" in one_way[0]
+    assert len(split) == 1 and split[0].startswith("map: ") and "not connected" in split[0]

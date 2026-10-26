@@ -5,7 +5,7 @@ from agvtb.planning.m6_gate import RULES
 from agvtb.sim import simulator
 from agvtb.sim.simulator import SimConfig, Simulation, simulate
 from agvtb.world.loader import load_world
-from helpers import CONFIGS
+from helpers import CONFIGS, one_way_tiny_config, split_config
 
 
 @pytest.fixture(scope="module")
@@ -75,3 +75,11 @@ def test_slow_jobs_are_reported(run26):
     m, d = run26.m6, run26.deadlock
     assert m["rest_rule"] == "branch" and m["slow_jobs"] == len(m["slow"]) == d["partial_jobs"] + d["held_at_end"]
     assert all(s["fallback_wait_s"] >= 0.0 for s in m["slow"])
+
+
+def test_the_m6_gate_refuses_maps_the_theorems_do_not_cover(tmp_path):  # final review I1, M1
+    for sub, make in (("a", one_way_tiny_config), ("b", split_config)):
+        (tmp_path / sub).mkdir()
+        with pytest.raises(GateError) as err:
+            Simulation(load_world(make(tmp_path / sub)), (), SimConfig(1, 1.0, planner="m6", rest_rule="all"))
+        assert not err.value.report.ok and err.value.report.violations[0].startswith("map: ")
