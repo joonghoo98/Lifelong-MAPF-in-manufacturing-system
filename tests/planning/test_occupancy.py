@@ -43,6 +43,13 @@ def test_the_last_interval_splits_at_the_soft_entries(tmp_path, now, soft, locke
     assert occ.intervals("K", 1, frozenset(locked), False) == hard_only
 
 
+def test_a_soft_entry_covers_the_gaps_before_a_later_hard_entry(tmp_path):  # final review C1
+    lw, cm = evict_world(tmp_path, "loop")
+    occ = raw(lw, cm, 0.0, {7: [("K", 0.0, 5.0), ("K", 10.0, 12.0)], 8: [("K", 3.0, INF)]})
+    assert occ.intervals("K", 1, frozenset(), True) == [(12.0, INF, (8,))]  # (5, 10) is not free: 8 rests from 3
+    assert occ.intervals("K", 1, frozenset(), False) == []
+
+
 def test_the_planning_vehicle_does_not_see_itself(tmp_path):
     lw, cm = evict_world(tmp_path, "loop")
     occ = raw(lw, cm, 0.0, H7 | {8: [("K", 6.0, INF)], 9: [("K", 7.0, INF)]})

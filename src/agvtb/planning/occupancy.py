@@ -114,8 +114,11 @@ class Occupancy:
     def intervals(self, key: str, me: int, locked: frozenset[int],
                   split: bool) -> list[tuple[float, float, tuple[int, ...]]]:
         """The safe intervals (lo, hi, owners to evict) of key for vehicle me. Not split, or for a locked owner, a soft
-        entry is hard. Split (design decision 4): the last free interval [t1, INF) becomes [t1, first soft start), if
-        not empty, and [max(t1, now, last soft start), INF) owned by the soft entries' vehicles."""
+        entry is hard. Split (design decision 4): the intervals free of every entry, soft ones included, then, when the
+        hard entries leave a last free interval [t1, INF), [max(t1, now, last soft start), INF) owned by the soft
+        entries' vehicles. A soft entry need not lie in that last interval (the spec's Invariant 1): a later hard entry
+        of a state that conflicts with the key but not with the resting stop is allowed, so the gaps before it are not
+        free either (final review C1)."""
         hard, soft = [], []
         for v, lo, hi in self._by_key.get(key, ()):
             if v == me:
@@ -127,14 +130,10 @@ class Occupancy:
         ivs = safe_intervals(hard)
         if not soft:
             return [(lo, hi, ()) for lo, hi in ivs]
-        if not ivs or ivs[-1][1] != INF:  # no last free interval: the soft entries are as good as hard
-            return [(lo, hi, ()) for lo, hi in safe_intervals(hard + [(lo, INF) for _, lo in soft])]
-        t1 = ivs[-1][0]
-        first, last = min(lo for _, lo in soft), max(lo for _, lo in soft)
-        out = [(lo, hi, ()) for lo, hi in ivs[:-1]]
-        if t1 < first - EPS:
-            out.append((t1, first, ()))
-        out.append((max(t1, self.now, last), INF, tuple(sorted({v for v, _ in soft}))))
+        out = [(lo, hi, ()) for lo, hi in safe_intervals(hard + [(lo, INF) for _, lo in soft])]
+        if ivs and ivs[-1][1] == INF:
+            last = max(lo for _, lo in soft)
+            out.append((max(ivs[-1][0], self.now, last), INF, tuple(sorted({v for v, _ in soft}))))
         return out
 
     def owner(self, cell: str) -> int | None:

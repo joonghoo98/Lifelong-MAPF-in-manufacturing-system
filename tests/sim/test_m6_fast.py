@@ -36,7 +36,8 @@ def test_a_short_kairos_fast_run_is_clean(run26):
     s = run26.stats
     clean(run26)
     assert s["m6_fast_ok"] >= 1 and s["m6_fast_evicted"] >= 1
-    assert s["commits"] == s["m6_fast_ok"] - s["m6_gate_revoked"] + s["m6_fallback_used"]
+    assert s["commits"] == s["m6_fast_ok"] - s["m6_fast_overlap"] - s["m6_gate_revoked"] + s["m6_fallback_used"]
+    assert s["m6_fast_overlap"] == 0
     assert any(not c.fallback and c.evict for c in run26.commits)
 
 
@@ -86,6 +87,28 @@ def test_a_fast_bundle_that_cannot_be_revoked_is_a_finding(kairos, monkeypatch):
     r = m6(kairos, n_vehicles=12, measure_s=300.0)
     assert state["fired"] == 1 and r.stats["m6_gate_revoke_refused"] == 1
     assert r.checks["commit_gate"][0]["why"] == "revoke_refused" and not r.ok
+
+
+def test_an_overlapping_fast_bundle_goes_to_the_fallback(kairos, monkeypatch):  # final review I2
+    from agvtb.sim import m6_mode
+    real_check, real_plan, state = m6_mode.path_vs_entries, EvictionPlanner.plan, {"armed": False, "fired": 0}
+
+    def plan(self, *a, **kw):
+        b = real_plan(self, *a, **kw)
+        if b is not None and not state["fired"]:
+            state["armed"] = True
+        return b
+
+    def check(path, others, conflicts):  # the first look at the first fast bundle finds a (fake) overlap
+        if state["armed"]:
+            state["armed"], state["fired"] = False, 1
+            return [{"b": -1, "sa": path[0][0], "sb": path[0][0], "t": path[0][1]}]
+        return real_check(path, others, conflicts)
+    monkeypatch.setattr(EvictionPlanner, "plan", plan)
+    monkeypatch.setattr(m6_mode, "path_vs_entries", check)
+    r = m6(kairos, n_vehicles=12, measure_s=300.0)
+    assert state["fired"] == 1 and r.stats["m6_fast_overlap"] == 1 and r.commits[0].fallback
+    clean(r)  # the overlap never went on the TAPG
 
 
 def test_the_sl_mode_has_no_fast_path_counts():  # G4 (passes before M6b too: it guards the default mode)

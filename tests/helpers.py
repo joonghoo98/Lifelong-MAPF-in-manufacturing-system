@@ -281,9 +281,9 @@ EVICT_MAPS = {  # name -> (nodes {id: (x, y)}, two-way links, ports); 1 m grid m
                "G": (0, -1), "H": (-1, 0), "U": (-2, 0), "W": (-1, 1)},
               [("J", "A"), ("A", "B"), ("B", "C"), ("C", "D"), ("D", "E"), ("J", "F"), ("J", "G"), ("J", "H"),
                ("H", "U"), ("H", "W")], ["E", "U"]),
-    "tail": ({"R0": (0, 0), "L1": (1, 0), **{f"c{i}": (1 + i, 0) for i in range(1, 13)}, "U": (14, 0), "D": (15, 0)},
-             [("R0", "L1"), ("L1", "c1"), *[(f"c{i}", f"c{i + 1}") for i in range(1, 12)], ("c12", "U"), ("U", "D")],
-             ["L1", "U"]),
+    "tail": ({"R0": (0, 0), "L1": (1, 0), **{f"c{i}": (1 + i, 0) for i in range(1, 26)}, "U": (27, 0), "D": (28, 0)},
+             [("R0", "L1"), ("L1", "c1"), *[(f"c{i}", f"c{i + 1}") for i in range(1, 25)], ("c25", "U"), ("U", "D")],
+             ["L1", "U"]),  # 25 corridor cells: going back to R0 costs more than evicting the vehicle on D
 }
 
 

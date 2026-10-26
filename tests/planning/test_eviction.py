@@ -71,8 +71,8 @@ def test_tail_evictions_see_r_path(tmp_path):  # decision 1, the gap of spec lin
     planner, stats, cons, ends, homes = setup(lw, cm, cells_of(cm, "R0", "D"),
                                              {1: rest_at(lw, "R0"), 2: rest_at(lw, "D")})
     b = planner.plan(1, ["L1", "U"], ends, cons, homes, 0.0)
-    assert b is None or clean(lw, b, ends)
-    assert b is not None or stats["m6_fail_tail_evict"] + stats["m6_fail_tail_hard"] == 1
+    # the tail evicts the vehicle on D; it can only leave down the corridor r just came up, after r: no fast plan
+    assert b is None and stats["m6_fail_tail_hard"] == 1 and stats["m6_chain_max"] == 1
 
 
 def test_a_failed_plan_leaves_the_occupancy_as_it_was(tmp_path, monkeypatch):  # spec CE-5 (1): a transaction

@@ -26,7 +26,7 @@ class M6Mode:
     def __init__(self, sim, cells: CellMap, rest: Sequence[str]) -> None:
         self.sim, self.cells, self.rest = sim, cells, tuple(rest)
         sim.counts["m6_bundle_cycles"] = 0
-        sim.counts["m6_gate_revoked"] = sim.counts["m6_gate_revoke_refused"] = 0
+        sim.counts["m6_gate_revoked"] = sim.counts["m6_gate_revoke_refused"] = sim.counts["m6_fast_overlap"] = 0
         sim.checks["m6_fallback_fail"] = []
         self.fast = (EvictionPlanner(sim.graph, sim.conflicts, cells, self.rest, sim.planner.stats,
                                      budget=sim.cfg.budget) if sim.cfg.fast_path else None)
@@ -42,6 +42,10 @@ class M6Mode:
         ends = {u: tapg.paths[u][-1] for u in sorted(tapg.paths)}
         moving = {u: executor.vehicles[u].state != "DONE" for u in sorted(tapg.paths)}
         b = self.fast.plan(vid, legs, ends, cons, sim.ledger.snapshot(), t) if self.fast is not None else None
+        if b is not None and self._overlaps(t, b):  # never expected: design §6 point 1 made a check (final review I2)
+            sim.counts["m6_fast_overlap"] += 1
+            sim._log(t, "m6_fast_overlap", vid, tuple(legs))
+            b = None
         if b is None:
             b = sim.planner.plan(vid, legs, ends, cons)
         if b is None:
@@ -89,6 +93,19 @@ class M6Mode:
         sim.counts["plan_fail"] += 1
         sim.checks["m6_fallback_fail"].append({"t": t, "vid": vid, "legs": list(legs)})
         sim._log(t, "plan_fail", vid, tuple(legs))
+
+    def _overlaps(self, t: float, b: Bundle) -> bool:
+        """Does a member's new path collide with what another vehicle will hold (its live entries, a member's with its
+        new path joined on)? The same look as _check's plan_overlaps, made before the bundle goes on. The fallback
+        bundle has its own (M6Fallback.plan)."""
+        sim = self.sim
+        tapg, executor = sim.tapg, sim.executor
+        held = {}
+        for w in sorted(tapg.paths):
+            whole = tapg.paths[w][:-1] + b.paths[w] if w in b.paths else tapg.paths[w]
+            held[w] = live_entries(whole, executor.vehicles[w].path_idx, executor.vehicles[w].claim_idx, t)
+        return any(path_vs_entries(b.paths[u], {w: es for w, es in held.items() if w != u}, sim.conflicts)
+                   for u in b.order)
 
     def _put(self, t: float, b: Bundle) -> dict[int, int]:
         """All members on the TAPG, then their cross edges again from the old last stops, then told to go on. Returns

@@ -70,6 +70,16 @@ def test_a_vehicle_cannot_rest_where_it_stood_through_the_lock(tmp_path):  # spe
     assert lw.graph[found.path[-1][0]].nodes[0] == "E"
 
 
+def test_a_split_search_does_not_pass_a_resting_vehicle_unseen(tmp_path):  # final review C1
+    lw, cm = evict_world(tmp_path, "loop")
+    sipp = SplitSipp(lw.graph, lw.conflicts, cm, Counter())
+    occ, _, _, _ = occupancy_of(lw, cm, cells_of(cm, "A", "B"), {1: rest_at(lw, "A")}, 0.0,
+                                {7: [("M,A,B", 20.0, 25.0)], 8: [("M,A,B", 0.0, INF)]})
+    found = sipp.staged(occ, 1, rest_at(lw, "A")[0][0], 0.0, ["P"], frozenset({1}), True)
+    used = [t for sid, t in found.path if sid == "M,A,B"]
+    assert not used or 8 in [v for v, _ in found.blocking]  # 8 holds M,A,B from 0: pass it only by evicting 8
+
+
 def test_a_search_over_budget_fails(tmp_path):
     lw, cm = evict_world(tmp_path, "ce1")
     stats = Counter()
