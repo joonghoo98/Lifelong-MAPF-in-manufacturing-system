@@ -223,3 +223,24 @@ def timelines_digest(timelines) -> str:
     """sha256 of the JSON of {vehicle: path}, vehicles in order and named as strings."""
     data = {str(v): [[s, t] for s, t in timelines[v]] for v in sorted(timelines)}
     return hashlib.sha256(json.dumps(data).encode()).hexdigest()
+
+
+def _undirected(edges):
+    adj = {}
+    for a, b in edges:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+    return {v: tuple(sorted(us)) for v, us in sorted(adj.items())}
+
+
+_LOLLIPOP = [("0", "1"), ("1", "2"), ("2", "3"), ("3", "0"), ("0", "4"), ("4", "5"), ("5", "6")]
+SMALL_GRAPHS = {  # name -> (adjacency, ports); R26 verdicts: plans/2026-10-24-m6a-fallback-mode_files/ref_cases.out.txt
+    "lollipop": (_undirected(_LOLLIPOP), ("2", "6")),
+    "cutport": (_undirected(_LOLLIPOP), ("2", "5")),
+    "spider": (_undirected([("0", "1"), ("1", "2"), ("2", "3"), ("0", "4"), ("4", "5"), ("5", "6"), ("0", "7")]),
+               ("3", "6")),
+    "comb": (_undirected([("0", "1"), ("1", "2"), ("2", "3"), ("3", "0"), ("0", "4"), ("4", "5"), ("5", "6"),
+                          ("2", "7"), ("7", "8")]), ("6",)),
+    "longlane": (_undirected([("0", "1"), ("1", "2"), ("2", "0"), ("0", "3"), ("3", "4"), ("4", "5"), ("5", "6"),
+                              ("6", "7"), ("7", "8")]), ("1", "5")),
+}
