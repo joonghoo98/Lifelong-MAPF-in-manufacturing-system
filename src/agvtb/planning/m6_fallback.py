@@ -40,8 +40,9 @@ class Bundle:
     homes: dict[int, str]  # member -> the rest cell its path ends in
     order: tuple[int, ...]  # the other members by their first step, then r
     t0: float  # max(r's start time, t_star): no member moves before it
-    t_star: float  # the latest finite reservation end of the other vehicles
-    moves: int  # cell moves
+    t_star: float  # the latest finite reservation end of the other vehicles; 0 for a fast-path bundle
+    moves: int  # cell moves; 0 for a fast-path bundle
+    fast: bool = False  # made by the fast path (M6b); a fallback bundle otherwise
 
 
 class M6Fallback:

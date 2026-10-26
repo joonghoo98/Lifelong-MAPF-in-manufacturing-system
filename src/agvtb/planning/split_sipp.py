@@ -34,7 +34,8 @@ class Found:
 
 
 def target_locks(path: Sequence[tuple[str, float]], cm: CellMap, graph: StateGraph) -> dict[str, float]:
-    """BuildTargetLocks (spec CE-4, design §5.5): cell -> the last time path leaves it; the last element's cells INF."""
+    """BuildTargetLocks (spec CE-4, design §5.5): cell -> the last time path leaves it; the last element's cells
+    INF."""
     locks: dict[str, float] = {}
     for i, (sid, _) in enumerate(path):
         end = path[i + 1][1] if i + 1 < len(path) else INF
@@ -81,20 +82,22 @@ class SplitSipp:
         _HardOnly when not split)."""
         m = len(legs)
         return self._search(occ, me, start, t0, list(legs), locked, split,
-                            lambda k, sid, iv, t: frozenset() if k == m else None, self._hfun(legs))
+                            lambda k, sid, iv, t, came: frozenset() if k == m else None, self._hfun(legs))
 
     def nearest_rest(self, occ: Occupancy, me: int, start: str, t0: float, locks: Mapping[str, float],
                      locked: frozenset[int], split: bool) -> Found | None:
         """To a stop it may rest on (spec FindNearestIdleSpot, lines 171-174 and §4.4): its last interval, in a rest
-        cell (U2 ①), after locks of that cell, no hard entry later, and the cell's owner none, me, or (split) a vehicle
-        to evict that is not locked."""
+        cell (U2 ①), no hard entry later, and the cell's owner none, me, or (split) a vehicle to evict that is not
+        locked. Spec line 173 (c) on cells: the path came into the cell after the cell's lock. A spec state is one per
+        vertex, so its arrival is when the vehicle came in; here a node has a stop per heading, and turning on the spot
+        reaches a new stop without coming in (Task 3 ruling)."""
         cm, graph = self.cm, self.graph
 
-        def goal(k, sid, iv, t):
+        def goal(k, sid, iv, t, came):
             if iv[1] != INF:
                 return None
             cell = cm.cell_of[graph[sid].nodes[0]]
-            if cell not in occ.rest or t <= locks.get(cell, -INF) + EPS or not occ.parking_ok(sid, t, me):
+            if cell not in occ.rest or (cell in locks and came <= locks[cell] + EPS) or not occ.parking_ok(sid, t, me):
                 return None
             owner = occ.owner(cell)
             if owner is None or owner == me:
@@ -111,17 +114,20 @@ class SplitSipp:
         """To any stop at node, hard only (spec SingleGoalSIPP_HardOnly, line 206)."""
         graph = self.graph
         return self._search(occ, me, start, t0, [], frozenset(), False,
-                            lambda k, sid, iv, t: frozenset() if graph[sid].nodes[0] == node else None,
+                            lambda k, sid, iv, t, came: frozenset() if graph[sid].nodes[0] == node else None,
                             lambda k, sid: 0.0)
 
     def exit_s(self, sid: str) -> float:
-        """The protection time of decision 2: how long it takes to leave sid's cell for any neighbour cell. For each
-        neighbour cell the quickest way out (M and R states inside the cell, then one move out), the largest of those;
-        0 if the cell has no way out. Other vehicles are not looked at."""
+        """The protection time of decision 2: how long sid's stop must be held so that its vehicle can leave its cell
+        for any neighbour cell. A vehicle coming in at s blocks each state x of the leaving vehicle from s less x's
+        duration (reservations.py:35-37), so x must end by then: a way out is clear once every state x on it has
+        ended and x's duration more has passed. For each neighbour cell the quickest way out (M and R states inside
+        the cell, then one move out) and its clearing time; the largest over the neighbour cells, 0 if there is no
+        way out. Other vehicles are not looked at."""
         out = self._exit.get(sid)
         if out is None:
             inside = set(self.cm.members[self.cm.cell_of[self.graph[sid].nodes[0]]])
-            dist, heap, best = {sid: 0.0}, [(0.0, sid)], {}
+            dist, clear, heap, best = {sid: 0.0}, {sid: 0.0}, [(0.0, sid)], {}
             while heap:
                 d, cur = heapq.heappop(heap)
                 if d > dist[cur]:
@@ -130,14 +136,15 @@ class SplitSipp:
                     state = self.graph[act]
                     if state.kind not in ("M", "R"):
                         continue
+                    nd = d + state.duration_s
+                    cleared = max(clear[cur], nd + state.duration_s)
                     if not set(state.nodes) <= inside:  # a move out of the cell
                         cell = self.cm.cell_of[state.nodes[1]]
-                        best[cell] = min(best.get(cell, INF), d + state.duration_s)
+                        best[cell] = min(best.get(cell, INF), cleared)
                         continue
                     for s2 in state.next:
-                        nd = d + state.duration_s
                         if nd < dist.get(s2, INF):
-                            dist[s2] = nd
+                            dist[s2], clear[s2] = nd, cleared
                             heapq.heappush(heap, (nd, s2))
             out = max(best.values(), default=0.0)
             self._exit[sid] = out
@@ -199,8 +206,9 @@ class SplitSipp:
 
     def _search(self, occ: Occupancy, me: int, start: str, t0: float, legs: list[str], locked: frozenset[int],
                 split: bool, goal, h, phi=None) -> Found | None:
-        """goal(k, sid, iv, t) -> None (not a goal) or the vehicles to evict there. Without phi the first goal popped is
-        the answer; with phi a goal goes back on the heap with phi(sid) added, and the first of those popped is."""
+        """goal(k, sid, iv, t, came) -> None (not a goal) or the vehicles to evict there; came is when the path last
+        came into the stop's cell (the start of that move; -INF for the start cell). Without phi the first goal popped
+        is the answer; with phi a goal goes back on the heap with phi(sid) added, and the first of those popped is."""
         cache: dict[str, list[Interval]] = {}
 
         def ivs(key: str) -> list[Interval]:
@@ -216,6 +224,8 @@ class SplitSipp:
         best: dict[Node, float] = {node0: t0}
         parent: dict[Node, tuple | None] = {node0: None}
         evs: dict[Node, frozenset[int]] = {node0: frozenset(iv0[2])}
+        came: dict[Node, float] = {node0: -INF}
+        cell_of = {s: self.cm.cell_of[self.graph[s].nodes[0]] for s in (start,)}
         extra: dict[Node, frozenset[int]] = {}
         heap = [(t0 + h0 + self.c_evict * len(evs[node0]), t0, 0, node0)]
         n = 0
@@ -230,7 +240,7 @@ class SplitSipp:
                 self.stats["m6_search_budget"] += 1
                 return None
             k, sid, iv = node
-            more = goal(k, sid, iv, t)
+            more = goal(k, sid, iv, t, came[node])
             if more is not None:
                 if phi is None:
                     return self._found(occ, parent, evs, node, more, t0, n)
@@ -244,6 +254,10 @@ class SplitSipp:
                     if hv == INF:
                         continue
                     best[node2], parent[node2], evs[node2] = a, (node, seg), evs[node] | frozenset(own)
+                    for x in (sid, s2):
+                        if x not in cell_of:
+                            cell_of[x] = self.cm.cell_of[self.graph[x].nodes[0]]
+                    came[node2] = seg[0][1] if cell_of[s2] != cell_of[sid] else came[node]
                     heapq.heappush(heap, (a + hv + self.c_evict * len(evs[node2]), a, 0, node2))
         return None
 

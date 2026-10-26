@@ -61,6 +61,15 @@ def test_nearest_rest_keeps_out_of_owned_and_locked_cells(tmp_path):
         assert lw.graph[found.path[-1][0]].nodes[0] == "G2" and found.blocking == ()
 
 
+def test_a_vehicle_cannot_rest_where_it_stood_through_the_lock(tmp_path):  # spec line 173 (c) on cells
+    lw, cm = evict_world(tmp_path, "fork")
+    sipp = SplitSipp(lw.graph, lw.conflicts, cm, Counter())
+    occ, _, _, _ = occupancy_of(lw, cm, cells_of(cm, "E", "G2"), {})
+    found = sipp.nearest_rest(occ, 1, facing(lw, "G2", "G"), 0.0, {cm.cell_of["G2"]: 4.0}, frozenset({1}), False)
+    # turning round on G2 (5 s) would end after the lock, and be cheaper than E; but it never left G2
+    assert lw.graph[found.path[-1][0]].nodes[0] == "E"
+
+
 def test_a_search_over_budget_fails(tmp_path):
     lw, cm = evict_world(tmp_path, "ce1")
     stats = Counter()
@@ -80,5 +89,7 @@ def test_target_locks_are_the_last_visits(tmp_path):
 def test_the_exit_time_lets_the_vehicle_leave_its_cell_any_way(tmp_path):  # decision 2
     lw, cm = evict_world(tmp_path, "fork")
     g, sipp = lw.graph, SplitSipp(lw.graph, lw.conflicts, cm, Counter())
-    assert sipp.exit_s(facing(lw, "G2", "G")) == g["M,G2,G"].duration_s  # one way out
-    assert sipp.exit_s(facing(lw, "J", "E")) > g["M,J,E"].duration_s  # turning to F or G takes longer
+    turn = g[next(x for x in g[facing(lw, "J", "E")].next if x.startswith("R,") and "M,J,F" in g[g[x].next[0]].next)]
+    assert sipp.exit_s(facing(lw, "G2", "G")) == 2 * g["M,G2,G"].duration_s  # one way out: the move, then as long
+    # E is straight ahead; F and G take a quarter turn and a move: cleared once the turn has ended and lasted again
+    assert sipp.exit_s(facing(lw, "J", "E")) == max(2 * turn.duration_s, turn.duration_s + 2 * g["M,J,F"].duration_s)
