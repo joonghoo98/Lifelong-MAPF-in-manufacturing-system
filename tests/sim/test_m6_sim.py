@@ -13,9 +13,9 @@ def kairos():
     return load_world(CONFIGS / "KAIROS_AMR.json")
 
 
-def m6(lw, **kw):
+def m6(lw, **kw):  # M6a's mode: every plan a fallback bundle
     cfg = dict(n_vehicles=26, rate_per_min=1.0, seed=0, warmup_s=0.0, measure_s=1800.0, planner="m6",
-               rest_rule="branch") | kw
+               rest_rule="branch", fast_path=False) | kw
     return simulate(lw, (), SimConfig(**cfg))
 
 
@@ -32,7 +32,7 @@ def run26(kairos):
 
 def test_the_sl_defaults_stay():
     c = SimConfig(4, 1.0)
-    assert (c.planner, c.rest_rule, c.tail_cut) == ("sl", "no-cut", True)
+    assert (c.planner, c.rest_rule, c.tail_cut, c.fast_path) == ("sl", "no-cut", True, True)
 
 
 def test_the_m6_gate_refuses_one_vehicle_too_many(kairos):
@@ -55,7 +55,7 @@ def test_m6_runs_are_deterministic(kairos):  # Review Focus 5
 @pytest.mark.parametrize("rule", RULES)
 def test_short_mini_m6_runs_are_clean(rule):
     r = simulate(load_world(CONFIGS / "mini_deadend.json"), (),
-                 SimConfig(10, 1.0, warmup_s=0.0, measure_s=1800.0, planner="m6", rest_rule=rule))
+                 SimConfig(10, 1.0, warmup_s=0.0, measure_s=1800.0, planner="m6", rest_rule=rule, fast_path=False))
     clean(r)
     assert r.kpi["completed"] >= 5
 

@@ -52,6 +52,7 @@ class SimConfig:
     cut_margin: float = 0.0  # A2: the old plan must leave the splice at now + margin or later (seconds)
     planner: str = "sl"  # "sl" (sidings, A1 + B + A2) or "m6" (rest cells, fallback bundles; M6 design §5.1)
     rest_rule: str = "no-cut"  # m6: the rest rule (no-cut, branch or all)
+    fast_path: bool = True  # m6: the fast path first (M6b); False: every plan is a fallback bundle (M6a)
 
 
 @dataclass(frozen=True)
