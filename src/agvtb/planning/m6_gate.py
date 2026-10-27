@@ -9,7 +9,8 @@ Theorem C (R26 §3; its T1..T4 are C1..C4 here) lets idle vehicles rest on the c
   C4  every port cell that is a cut cell lies within V - N edges of a station.
 V is the number of cells and N the number of vehicles. The verdicts are those of R26 check_c.theorem_c.
 The theorems also assume a map of two-way segments that join all its nodes (design §3); map_assumptions checks
-that first, and a map that breaks it is refused before its cells are built.
+that first, and a map that breaks it is refused before its cells are built. Once they are, cell_facts checks the
+facts Theorem B uses besides the cell rule (R32 I-2), and cells that break one are refused too.
 """
 from collections import deque
 from collections.abc import Collection
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 
 from agvtb.world.cells import CellMap, dead_end_cells
 from agvtb.world.model import World
+from agvtb.world.states import Conflicts, StateGraph
 
 RULES = ("no-cut", "branch", "all")
 
@@ -42,6 +44,67 @@ def map_assumptions(world: World) -> tuple[str, ...]:
     if len(seen) < len(nodes):
         out.append(f"map: the node graph is not connected: {len(nodes) - len(seen)} of {len(nodes)} nodes are not "
                    f"joined to {nodes[0]}")
+    return tuple(out)
+
+
+def cell_facts(cm: CellMap, graph: StateGraph, conflicts: Conflicts, ports: Collection[str]) -> tuple[str, ...]:
+    """The facts Theorem B uses besides the cell rule (R32 I-2) that the cells break, each a line starting "cells: ".
+
+    The conflict sets are symmetric; every cell has a stop; from every stop of a cell, a stop of each neighbour cell
+    is reached through states whose nodes all lie in the two cells; from every stop of a port's cell, an L state at
+    the port is reached inside that cell (an L state goes back to its own stop, states.py). Empty when all hold.
+    """
+    out = []
+    asym = sorted((a, b) for a in conflicts for b in conflicts[a] if a not in conflicts.get(b, ()))
+    if asym:
+        out.append(f"cells: {len(asym)} conflict entries are not symmetric, first {asym[0][0]} -> {asym[0][1]}")
+    touch = {sid: frozenset(cm.cell_of[n] for n in st.nodes) for sid, st in graph.items()}
+    by_cell: dict[str, list[str]] = {c: [] for c in cm.cells}
+    stops: dict[str, list[str]] = {c: [] for c in cm.cells}
+    for sid, cs in touch.items():
+        for c in cs:
+            by_cell[c].append(sid)
+        if graph[sid].kind == "S":
+            stops[cm.cell_of[graph[sid].nodes[0]]].append(sid)
+    empty = [c for c in cm.cells if not stops[c]]
+    if empty:
+        out.append(f"cells: {len(empty)} cells have no stop, first {empty[0]!r}")
+
+    def inside(cs: frozenset[str]) -> set[str]:
+        return {sid for c in cs for sid in by_cell[c] if touch[sid] <= cs}
+
+    def reaches(start: str, allowed: set[str], goal) -> bool:
+        seen, todo = {start}, deque([start])
+        while todo:
+            x = todo.popleft()
+            if goal(graph[x]):
+                return True
+            for y in graph[x].next:
+                if y in allowed and y not in seen:
+                    seen.add(y)
+                    todo.append(y)
+        return False
+
+    stuck = []
+    for c in cm.cells:
+        for d in cm.adj[c]:
+            allowed = inside(frozenset((c, d)))
+            stuck += [(s, c, d) for s in stops[c]
+                      if not reaches(s, allowed, lambda st: st.kind == "S" and cm.cell_of[st.nodes[0]] == d)]
+    if stuck:
+        s, c, d = stuck[0]
+        out.append(f"cells: {len(stuck)} stops cannot reach a neighbour cell through the two cells, first {s} in "
+                   f"{c!r} to {d!r}")
+    unloaded = []
+    for p in sorted(ports):
+        c = cm.cell_of[p]
+        allowed = inside(frozenset((c,)))
+        unloaded += [(s, p) for s in stops[c]
+                     if not reaches(s, allowed, lambda st: st.kind == "L" and st.nodes[0] == p)]
+    if unloaded:
+        s, p = unloaded[0]
+        out.append(f"cells: {len(unloaded)} stops cannot reach the L state of their port inside its cell, first {s} "
+                   f"to port {p!r}")
     return tuple(out)
 
 
@@ -188,7 +251,7 @@ class M6GateReport:
     n_rest: int
     longest_hop: int
     failed: tuple[str, ...]
-    map_violations: tuple[str, ...] = ()  # map_assumptions; when there are some, no cells were built
+    map_violations: tuple[str, ...] = ()  # map_assumptions, else cell_facts; when there are some, C1..C4 were not judged
 
     @property
     def ok(self) -> bool:
@@ -196,7 +259,8 @@ class M6GateReport:
 
     @property
     def violations(self) -> tuple[str, ...]:
-        """The map's broken assumptions ("map: ..."), then one line per failed condition, each starting "Cn: "."""
+        """The map's or the cells' broken assumptions ("map: ...", "cells: ..."), then one line per failed condition,
+        each starting "Cn: "."""
         room = self.n_cells - self.n_vehicles
         text = {
             "C1": f"{self.n_rest} rest cells for {self.n_vehicles} vehicles, or none of them is a station",

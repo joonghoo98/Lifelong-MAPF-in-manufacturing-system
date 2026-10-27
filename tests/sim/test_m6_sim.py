@@ -30,6 +30,15 @@ def run26(kairos):
     return m6(kairos)
 
 
+def test_the_m6_gate_refuses_cells_that_break_theorem_b(kairos, monkeypatch):  # R32 I-2, user decision 2026-10-27
+    seen = []
+    monkeypatch.setattr(simulator, "cell_facts", lambda cm, graph, conflicts, ports: seen.append(cm) or ("cells: x",))
+    with pytest.raises(GateError) as err:
+        Simulation(kairos, (), SimConfig(1, 1.0, planner="m6", rest_rule="branch"))
+    assert len(seen) == 1 and len(seen[0].cells) == 44
+    assert not err.value.report.ok and err.value.report.violations == ("cells: x",)
+
+
 def test_the_sl_defaults_stay():
     c = SimConfig(4, 1.0)
     assert (c.planner, c.rest_rule, c.tail_cut, c.fast_path) == ("sl", "no-cut", True, True)

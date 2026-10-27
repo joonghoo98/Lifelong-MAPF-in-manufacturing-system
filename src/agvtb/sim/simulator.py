@@ -17,7 +17,7 @@ from agvtb.planning.gate import GateError, GateReport, check_gate
 from agvtb.planning.intervals import INF
 from agvtb.planning.ledger import SidingLedger
 from agvtb.planning.m6_fallback import M6Fallback
-from agvtb.planning.m6_gate import M6GateReport, check_m6_gate, map_assumptions, rest_cells
+from agvtb.planning.m6_gate import M6GateReport, cell_facts, check_m6_gate, map_assumptions, rest_cells
 from agvtb.planning.offline import initial_stop
 from agvtb.planning.reservations import affects, path_constraints
 from agvtb.planning.rest_ledger import RestLedger
@@ -148,6 +148,10 @@ class Simulation:
                 self.gate = M6GateReport(cfg.rest_rule, cfg.n_vehicles, 0, 0, 0, (), broken)
                 raise GateError(self.gate)
             cells = build_cell_map(world, self.graph, self.conflicts)
+            broken = cell_facts(cells, self.graph, self.conflicts, world.port_nodes)
+            if broken:  # Theorem B's facts fail on these cells (R32 I-2): C1..C4 would not cover them either
+                self.gate = M6GateReport(cfg.rest_rule, cfg.n_vehicles, len(cells.cells), 0, 0, (), broken)
+                raise GateError(self.gate)
             self.gate = check_m6_gate(cells, cfg.rest_rule, cfg.n_vehicles)
             if not self.gate.ok:
                 raise GateError(self.gate)

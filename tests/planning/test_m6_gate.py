@@ -1,10 +1,12 @@
+from dataclasses import replace
+
 import pytest
 
-from agvtb.planning.m6_gate import (RULES, check_m6_gate, longest_hop, map_assumptions, rest_cells, station_hops,
-                                    theorem_c)
+from agvtb.planning.m6_gate import (RULES, cell_facts, check_m6_gate, longest_hop, map_assumptions, rest_cells,
+                                    station_hops, theorem_c)
 from agvtb.world.cells import build_cell_map, cell_map_from_graph
 from agvtb.world.loader import load_world
-from helpers import CONFIGS, SMALL_GRAPHS, one_way_tiny_config, split_config, world_of_config
+from helpers import CONFIGS, SMALL_GRAPHS, evict_world, one_way_tiny_config, split_config, world_of_config
 
 REFERENCE = [  # (graph, rule, N, failed): R26 check_c.theorem_c (ref_cases.out.txt), its T1..T4 being C1..C4
     ("lollipop", "branch", 3, ()), ("lollipop", "branch", 4, ("C2",)), ("lollipop", "branch", 5, ("C1", "C2")),
@@ -43,11 +45,11 @@ def test_station_hops_of_the_lollipop():
 @pytest.fixture(scope="module", params=sorted(MAP_REST))
 def built(request):
     lw = load_world(CONFIGS / f"{request.param}.json")
-    return request.param, build_cell_map(lw.world, lw.graph, lw.conflicts)
+    return request.param, lw, build_cell_map(lw.world, lw.graph, lw.conflicts)
 
 
 def test_the_gate_of_the_three_maps_at_their_limit(built):
-    name, cm = built
+    name, _, cm = built
     for rule, q in zip(RULES, MAP_REST[name]):
         assert len(rest_cells(cm, rule)) == q and check_m6_gate(cm, rule, q).ok
         refused = check_m6_gate(cm, rule, q + 1)
@@ -57,7 +59,7 @@ def test_the_gate_of_the_three_maps_at_their_limit(built):
 
 
 def test_the_report_as_data(built):
-    name, cm = built
+    name, _, cm = built
     if name == "KAIROS_AMR":
         assert check_m6_gate(cm, "branch", 26).summary() == {
             "ok": True, "violations": [], "rule": "branch", "vehicles": 26, "cells": 44, "rest": 26,
@@ -80,3 +82,44 @@ def test_the_map_assumptions(tmp_path):  # final review I1, M1: the theorems wan
     split = map_assumptions(world_of_config(split_config(tmp_path / "b")))
     assert len(one_way) == 1 and one_way[0].startswith("map: ") and "('B', 'C')" in one_way[0]
     assert len(split) == 1 and split[0].startswith("map: ") and "not connected" in split[0]
+
+
+def test_the_cell_facts_hold_on_the_three_maps(built):  # R32 I-2: Theorem B's unstated facts, on the testbed cells
+    _, lw, cm = built
+    assert cell_facts(cm, lw.graph, lw.conflicts, lw.world.port_nodes) == ()
+
+
+def without_steps_into(graph, drop):
+    """graph with every step into a state that drop picks taken out."""
+    return {sid: replace(st, next=tuple(n for n in st.next if not drop(graph[n]))) for sid, st in graph.items()}
+
+
+def test_cell_facts_find_stops_that_cannot_leave_their_cell(tmp_path):  # R32 I-2 (ii): the move inside C u C'
+    lw, cm = evict_world(tmp_path, "loop")
+    graph = without_steps_into(lw.graph, lambda st: st.kind == "M" and st.nodes[0] == "A")
+    found = cell_facts(cm, graph, lw.conflicts, lw.world.port_nodes)
+    assert len(found) == 1 and found[0].startswith("cells: ") and "neighbour" in found[0] and "S,A," in found[0]
+
+
+def test_cell_facts_find_a_port_whose_load_is_out_of_reach(tmp_path):  # R32 I-2 (iii): the port's L inside its cell
+    lw, cm = evict_world(tmp_path, "loop")
+    graph = without_steps_into(lw.graph, lambda st: st.kind == "L" and st.nodes[0] == "P")
+    found = cell_facts(cm, graph, lw.conflicts, lw.world.port_nodes)
+    assert len(found) == 1 and found[0].startswith("cells: ") and "L state" in found[0] and "'P'" in found[0]
+
+
+def test_cell_facts_find_a_cell_without_a_stop(tmp_path):  # R32 I-2: a cell must hold a stop to rest or wait on
+    lw, cm = evict_world(tmp_path, "loop")
+    graph = {sid: replace(st, next=tuple(n for n in st.next if not n.startswith("S,U,")))
+             for sid, st in lw.graph.items() if not sid.startswith("S,U,")}
+    found = cell_facts(cm, graph, lw.conflicts, lw.world.port_nodes)
+    assert any(f.startswith("cells: ") and "no stop" in f and "'U'" in f for f in found)
+
+
+def test_cell_facts_find_conflicts_that_are_not_symmetric(tmp_path):  # R32 I-2: Theorem B's property 1 needs it
+    lw, cm = evict_world(tmp_path, "loop")
+    a = next(s for s in sorted(lw.graph) if s.startswith("S,A,"))
+    b = next(s for s in sorted(lw.graph) if s.startswith("S,U,"))
+    assert b not in lw.conflicts[a]
+    found = cell_facts(cm, lw.graph, {**lw.conflicts, a: lw.conflicts[a] | {b}}, lw.world.port_nodes)
+    assert len(found) == 1 and found[0].startswith("cells: ") and "not symmetric" in found[0] and a in found[0]
