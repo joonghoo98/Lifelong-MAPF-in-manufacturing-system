@@ -78,6 +78,16 @@ def test_cli_runs_m6_and_records_the_mode(tmp_path):
     assert code in (0, 1)
     assert (data["planner"], data["rest_rule"], data["tail_cut"], data["sidings_choice"]) == ("m6", "branch", False, None)
     assert data["gate"]["ok"] and data["gate"]["rule"] == "branch" and "slow_jobs" in data["m6"]
+    assert data["fast_path"] is True and data["stats"]["m6_fast_ok"] > 0  # the fast path is on by default (M6b)
+
+
+def test_cli_m6_turns_the_fast_path_off_and_records_it(tmp_path):  # M6c plan: the M6a arm runs through run_sim
+    out = tmp_path / "m6a.json"
+    code = main([KAIROS, "--vehicles", "12", "--rate", "1", "--warmup", "0", "--measure", "300", "--planner", "m6",
+                 "--rest-rule", "branch", "--no-fast-path", "--out", str(out)])
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert code in (0, 1) and data["fast_path"] is False
+    assert "m6_fast_ok" not in data["stats"] and data["stats"]["m6_fallback_used"] > 0  # every plan a fallback
 
 
 def test_cli_m6_gate_refusal_writes_nothing(tmp_path):
@@ -87,7 +97,7 @@ def test_cli_m6_gate_refusal_writes_nothing(tmp_path):
 
 
 @pytest.mark.parametrize("extra", [["--planner", "m6", "--tail-cut"], ["--planner", "m6", "--sidings", "strict"],
-                                   ["--rest-rule", "branch"]])
+                                   ["--rest-rule", "branch"], ["--no-fast-path"], ["--fast-path"]])
 def test_cli_m6_usage_errors(extra):  # plan decision 5
     with pytest.raises(SystemExit) as exc:
         main([KAIROS, "--vehicles", "4", "--rate", "1"] + extra)
@@ -100,3 +110,4 @@ def test_an_sl_result_names_its_planner(tmp_path):
           "--out", str(out)])
     data = json.loads(out.read_text(encoding="utf-8"))
     assert (data["planner"], data["rest_rule"], data["tail_cut"]) == ("sl", None, True) and "m6" not in data
+    assert data["fast_path"] is None

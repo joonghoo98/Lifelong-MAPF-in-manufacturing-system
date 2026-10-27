@@ -1,7 +1,8 @@
 """The experiment runner (M5a): runs a list of conditions with run_sim, several at a time, and sums them up.
 
 A condition is a dict {"name", "config", "vehicles", "rate", "seed", "warmup", "measure", "sidings", "fromto"}
-(sidings and fromto may be None), with optional "tail_cut" (missing: run_sim's default, on) and "cut_margin" (0).
+(sidings and fromto may be None), with optional "tail_cut" (missing: run_sim's default, on) and "cut_margin" (0),
+and for m6 "planner", "rest_rule" and "fast_path" (missing: on; false: --no-fast-path, as M6a).
 Each run is its own process (python -B -m agvtb.tools.run_sim), writing
 <out>/<name>.json and <out>/<name>.log; a run whose JSON is already there and readable is skipped, so a cut batch
 goes on where it stopped. Only the main thread writes <out>/progress.txt. Exit codes are those of run_sim: 0 ok,
@@ -52,6 +53,8 @@ def run_argv(cond: dict, out_json: Path) -> list[str]:
         argv += ["--planner", cond["planner"]]
     if cond.get("rest_rule") is not None:
         argv += ["--rest-rule", cond["rest_rule"]]
+    if cond.get("fast_path") is False:
+        argv += ["--no-fast-path"]
     return argv + ["--out", str(out_json)]
 
 
@@ -78,6 +81,10 @@ def _is_run_of(result: dict, cond: dict) -> bool:
             and (cond.get("sidings") is None or result["sidings_choice"] == cond["sidings"])
             and planner == result.get("planner", "sl")
             and (cond.get("rest_rule", "no-cut") if planner == "m6" else None) == result.get("rest_rule")
+            # an m6 result from before M6c has no fast_path key: the fast path ran if its counts are there (R30), not
+            # if they are missing (R29, M6a)
+            and (planner != "m6" or cond.get("fast_path", True)
+                 == result.get("fast_path", "m6_fast_ok" in result.get("stats", {})))
             # a result from before A2 has no switch: it ran without A2 (M5c); m6 never uses A2
             and cond.get("tail_cut", planner == "sl") == result.get("tail_cut", False)
             and cond.get("cut_margin", 0.0) == result.get("cut_margin", 0.0))

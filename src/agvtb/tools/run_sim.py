@@ -6,8 +6,9 @@ one job a minute; --rate is jobs per minute. The gate is checked first; if it re
 and the exit code is 3. Exit codes: 0 no deadlock and no check finding, 1 a deadlock or a finding, 2 a usage
 error, 3 the gate refused.
 
-With --planner m6 (M6 design §5.1) the vehicles rest on the cells of --rest-rule (default no-cut) and every job
-is a fallback bundle; the M6 gate (Theorem C) is checked instead, no siding variant is read and A2 is off.
+With --planner m6 (M6 design §5.1) the vehicles rest on the cells of --rest-rule (default no-cut) and each job is
+planned by the fast path first (M6b; --no-fast-path: every job a fallback bundle, as M6a); the M6 gate (Theorem C)
+is checked instead, no siding variant is read and A2 is off.
 """
 import argparse
 import json
@@ -46,8 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cut-margin", type=float, default=0.0, metavar="S",
                         help="A2: the old plan must leave the splice at now + S or later (default 0)")
     parser.add_argument("--planner", choices=("sl", "m6"), default="sl",
-                        help="sl: sidings, A1 + B + A2 (default); m6: rest cells, every job a fallback bundle")
+                        help="sl: sidings, A1 + B + A2 (default); m6: rest cells, the fast path first, then the fallback")
     parser.add_argument("--rest-rule", choices=RULES, help="m6 only: the rest cells (default no-cut)")
+    parser.add_argument("--fast-path", action=argparse.BooleanOptionalAction, default=None,
+                        help="m6 only: the fast path first (default on; --no-fast-path: only the fallback, as M6a)")
     parser.add_argument("--out", metavar="FILE", help="JSON file for the result")
     args = parser.parse_args(argv)
     m6 = args.planner == "m6"
@@ -57,8 +60,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--sidings: m6 rests on the cells of its rest rule, not on sidings")
     if not m6 and args.rest_rule is not None:
         parser.error("--rest-rule: only --planner m6 has a rest rule")
+    if not m6 and args.fast_path is not None:
+        parser.error("--fast-path: only --planner m6 has a fast path")
     tail_cut = False if m6 else args.tail_cut is not False
     rest_rule = (args.rest_rule or "no-cut") if m6 else None
+    fast_path = (args.fast_path is not False) if m6 else None
     if args.vehicles < 1:
         parser.error(f"--vehicles must be >= 1, got {args.vehicles}")
     for name, value, ok in (("--rate", args.rate, args.rate >= 0), ("--warmup", args.warmup, args.warmup >= 0),
@@ -105,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--fromto: {exc}")
 
     sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, args.warmup, args.measure, args.dt, args.budget, fromto,
-                        tail_cut, args.cut_margin, args.planner, rest_rule or "no-cut")
+                        tail_cut, args.cut_margin, args.planner, rest_rule or "no-cut", fast_path is not False)
     started = time.perf_counter()
     try:
         result = simulate(lw, candidates, sim_cfg)
@@ -123,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             "warmup_s": args.warmup, "measure_s": args.measure, "dt": args.dt,
             "budget": args.budget if args.budget is not None else SafeTailPlanner.DEFAULT_BUDGET,
             "fromto": args.fromto, "tail_cut": tail_cut, "cut_margin": args.cut_margin,
-            "planner": args.planner, "rest_rule": rest_rule,
+            "planner": args.planner, "rest_rule": rest_rule, "fast_path": fast_path,
             "ok": result.ok, "gate": result.gate.summary(), "kpi": result.kpi,
             "deadlock": result.deadlock, "checks": result.checks, "stats": result.stats,
             "events_sha256": result.events_sha256, "n_events": result.n_events, "t_end": result.t_end,

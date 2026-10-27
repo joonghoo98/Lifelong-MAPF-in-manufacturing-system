@@ -90,6 +90,25 @@ def test_a_cut_condition_passes_the_switch_and_resumes_only_its_own(tmp_path):  
     assert json.loads(out_json.read_text(encoding="utf-8"))["tail_cut"] is True
 
 
+def test_an_m6a_condition_turns_the_fast_path_off_and_resumes_only_its_own(tmp_path):  # M6c plan: the M6a arm
+    from agvtb.tools.batch import run_argv
+    out_json = tmp_path / "a.json"
+    m6a = mini("a", planner="m6", rest_rule="branch", fast_path=False)
+    assert "--no-fast-path" not in run_argv(mini("a", planner="m6", rest_rule="branch"), out_json)
+    assert "--no-fast-path" in run_argv(m6a, out_json)
+    run_batch([m6a], tmp_path, workers=1)
+    assert json.loads(out_json.read_text(encoding="utf-8"))["fast_path"] is False
+    assert run_batch([m6a], tmp_path, workers=1)[0]["skipped"] is True
+    assert run_batch([mini("a", planner="m6", rest_rule="branch")], tmp_path, workers=1)[0]["skipped"] is False
+    stored = json.loads(out_json.read_text(encoding="utf-8"))
+    del stored["fast_path"]  # a result from before M6c: its stats tell whether the fast path ran (R30) or not (R29)
+    out_json.write_text(json.dumps(stored), encoding="utf-8")
+    assert run_batch([mini("a", planner="m6", rest_rule="branch")], tmp_path, workers=1)[0]["skipped"] is True
+    del stored["stats"]["m6_fast_ok"]
+    out_json.write_text(json.dumps(stored), encoding="utf-8")
+    assert run_batch([m6a], tmp_path, workers=1)[0]["skipped"] is True
+
+
 def test_an_m6_condition_passes_its_planner_and_resumes_only_its_own(tmp_path):
     from agvtb.tools.batch import run_argv
     out_json = tmp_path / "a.json"
