@@ -3,7 +3,7 @@
 Each frame handles the keys, advances the simulation by the wall time since the last frame times the speed (at
 most 60 s of simulated time per frame; the first frame only starts the clock), and draws the scene of that time.
 The events are run by the simulation's own kernel, so the drawing speed never changes the results. The map is
-drawn once onto a background surface.
+drawn once onto a background surface, with the sidings of an sl run or the rest cells of an m6 run.
 
 Keys: S speed, W warm-up, T sim time (type a number, Enter; Esc cancels), F fast run (F again stops it), Space
 pause, + / - speed step, . one dt step while paused, E stop the run where it is and
@@ -30,6 +30,7 @@ KIND_COLOR = {"move": (40, 170, 60), "rotate": (0, 160, 170), "blocked": (210, 4
 BACK, EDGE, NODE, PORT, SIDING, TEXT = (250, 250, 250), (205, 205, 205), (170, 170, 170), (30, 70, 200), \
     (130, 90, 170), (20, 20, 20)
 CYCLE_COLOR = (230, 0, 230)  # vehicles in a wait cycle: a colour no state uses
+REST = (150, 110, 60)  # the rest cells of an m6 run (user 2026-10-27), apart from the sidings of an sl run
 MIN_BODY_PX = 8  # a vehicle is drawn at least this big, so its colour shows on big maps
 KEYS_UP = (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS)  # '+' on a Korean or US keyboard is K_EQUALS
 KEYS_DOWN = (pygame.K_MINUS, pygame.K_KP_MINUS)
@@ -90,6 +91,8 @@ class Viewer:
         r = max(3, int(0.3 * self.scale))
         for s in self.sim.sidings:
             pygame.draw.circle(surface, SIDING, self.to_screen(*world.nodes[s]), r, 1)
+        for n in self.sim.m6.rest_nodes if self.sim.m6 is not None else ():
+            pygame.draw.circle(surface, REST, self.to_screen(*world.nodes[n]), r, 1)
         for p in sorted(set(world.port_nodes)):
             sx, sy = self.to_screen(*world.nodes[p])
             pygame.draw.rect(surface, PORT, pygame.Rect(sx - r, sy - r, 2 * r, 2 * r), 2)

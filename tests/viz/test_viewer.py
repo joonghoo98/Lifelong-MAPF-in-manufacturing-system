@@ -106,6 +106,43 @@ def test_cli_refuses_a_folder_as_screenshot_and_a_live_run_without_a_display(tmp
     assert exc.value.code == 2
 
 
+def test_cli_runs_m6_with_its_rest_rule_and_fast_path(tmp_path, monkeypatch):  # user 2026-10-27: M6b in the viewer
+    import agvtb.tools.view_sim as view_sim
+    made, real = [], view_sim.Simulation
+
+    def record(lw, candidates, cfg):
+        made.append((tuple(candidates), cfg))
+        return real(lw, candidates, cfg)
+    monkeypatch.setattr(view_sim, "Simulation", record)
+    out = tmp_path / "shot.png"
+    argv = [str(CONFIGS / "mini_deadend.json"), "--vehicles", "4", "--rate", "2", "--planner", "m6", "--rest-rule", "all",
+            "--no-fast-path", "--screenshot", str(out), "--at", "300"]
+    assert main(argv) == 0 and out.stat().st_size > 1000
+    candidates, cfg = made[0]
+    assert candidates == () and (cfg.planner, cfg.rest_rule, cfg.fast_path) == ("m6", "all", False)
+
+
+@pytest.mark.parametrize("extra, why", [(["--rest-rule", "branch"], "only --planner m6 has a rest rule"),
+                                        (["--no-fast-path"], "only --planner m6 has a fast path"),
+                                        (["--planner", "m6", "--sidings", "grid-bridge-s00"], "not on sidings")])
+def test_cli_m6_options_need_the_m6_planner(extra, why, capsys):  # the words of run_sim
+    with pytest.raises(SystemExit) as exc:
+        main([str(CONFIGS / "mini_deadend.json"), "--vehicles", "2", "--rate", "1"] + extra)
+    assert exc.value.code == 2 and why in capsys.readouterr().err
+
+
+def test_an_m6_run_draws_its_rest_cells():  # user 2026-10-27; an sl run draws none
+    from agvtb.viz.viewer import REST
+    lw = load_world(CONFIGS / "mini_deadend.json")
+    v = Viewer(Simulation(lw, (), SimConfig(4, 2.0, 0, 0.0, 900.0, 0.5, planner="m6", rest_rule="branch")))
+    w, h, r = *v.size, max(3, int(0.3 * v.scale))
+    for node in v.sim.m6.rest_nodes:
+        cx, cy = (round(c) for c in v.to_screen(*lw.world.nodes[node]))
+        box = [(x, y) for x in range(cx - r - 1, cx + r + 2) for y in range(cy - r - 1, cy + r + 2) if 0 <= x < w and 0 <= y < h]
+        assert any(tuple(v.background.get_at(p))[:3] == REST for p in box), node
+    assert pygame.mask.from_threshold(Viewer(make()).background, REST, (1, 1, 1, 255)).count() == 0
+
+
 def press(*keys):
     for key in keys:
         pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))

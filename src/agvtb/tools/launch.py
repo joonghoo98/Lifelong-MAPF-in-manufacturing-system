@@ -7,9 +7,11 @@ import math
 from collections.abc import Callable
 from pathlib import Path
 
+from agvtb.planning.m6_gate import RULES
 from agvtb.world.config import load_map_config
 
 DEFAULT_MAP = "mini_deadend"
+DEFAULT_RULE = "branch"  # the rest rule of the M6b acceptance runs on KAIROS (user, 2026-10-27)
 
 
 def runnable_configs(root: Path) -> list[Path]:
@@ -59,9 +61,17 @@ def _rate(text: str) -> float:
     return value
 
 
+def _one_of(words: tuple[str, ...]) -> Callable[[str], str]:
+    def parse(text: str) -> str:
+        if text.lower() not in words:
+            raise ValueError(f"needs {', '.join(words[:-1])} or {words[-1]}")
+        return text.lower()
+    return parse
+
+
 def build_argv(input_fn=input, print_fn=print, root: Path = Path("configs") / "maps") -> list[str]:
-    """Ask for the map, vehicles, jobs per minute and seed; the arguments of view_sim. Warm-up, sim time and speed
-    are set in the viewer itself (user, 2026-10-22)."""
+    """Ask for the map, the planner (for m6 also its rest rule and the fast path), vehicles, jobs per minute and seed;
+    the arguments of view_sim. Warm-up, sim time and speed are set in the viewer itself (user, 2026-10-22)."""
     configs = runnable_configs(root)
     if not configs:
         raise SystemExit(f"no map config with a siding variant under {root}")
@@ -77,10 +87,15 @@ def build_argv(input_fn=input, print_fn=print, root: Path = Path("configs") / "m
         return value
 
     chosen = configs[_ask("Map number", default_map, pick, input_fn, print_fn) - 1]
+    m6 = []  # user 2026-10-27: M6b in the viewer
+    if _ask("Planner, sl or m6", "sl", _one_of(("sl", "m6")), input_fn, print_fn) == "m6":
+        rule = _ask("Rest rule, " + " / ".join(RULES), DEFAULT_RULE, _one_of(RULES), input_fn, print_fn)
+        fast = _ask("Fast path, on or off", "on", _one_of(("on", "off")), input_fn, print_fn)
+        m6 = ["--planner", "m6", "--rest-rule", rule] + (["--no-fast-path"] if fast == "off" else [])
     vehicles = _ask("Vehicles", 8, _int_at_least(1), input_fn, print_fn)
     rate = _ask("Jobs per minute", 2.0, _rate, input_fn, print_fn)
     seed = _ask("Seed", 0, _int_at_least(0), input_fn, print_fn)
-    return [str(chosen), "--vehicles", str(vehicles), "--rate", f"{rate:g}", "--seed", str(seed)]
+    return [str(chosen), "--vehicles", str(vehicles), "--rate", f"{rate:g}", "--seed", str(seed)] + m6
 
 
 def main(argv: list[str] | None = None, input_fn=input, run: Callable[[list[str]], int] | None = None,

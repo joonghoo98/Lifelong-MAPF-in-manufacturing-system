@@ -7,7 +7,9 @@ quit; the KPI lines are those of [warm-up end, now]. --warmup, --sim-time and --
 If the run freezes the last frame stays until Esc. With
 --screenshot FILE --at T it advances to simulated time T, draws one frame, saves it as PNG and ends (works without
 a display with SDL_VIDEODRIVER=dummy). The viewer does not judge the run: it prints the same summary as run_sim and
-returns 0; 2 is a usage error and 3 a gate refusal, as in run_sim.
+returns 0; 2 is a usage error and 3 a gate refusal, as in run_sim. With --planner m6 (user, 2026-10-27) the vehicles
+rest on the cells of --rest-rule (default no-cut, as run_sim) and each job is planned by the fast path first
+(--no-fast-path: every plan a fallback bundle, as M6a); it needs no siding variant.
 """
 import argparse
 import math
@@ -15,6 +17,7 @@ import os
 from pathlib import Path
 
 from agvtb.planning.gate import GateError
+from agvtb.planning.m6_gate import RULES
 from agvtb.sidings.choice import candidates_of, parse_siding_choice
 from agvtb.sim.demand import normalize, read_fromto
 from agvtb.sim.simulator import SimConfig, Simulation
@@ -50,7 +53,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fromto", metavar="CSV", help="from-to rate table (default: uniform over the ports)")
     parser.add_argument("--screenshot", metavar="FILE", help="save one frame at --at as PNG and end")
     parser.add_argument("--at", type=float, metavar="T", help="simulated time of the screenshot")
+    parser.add_argument("--planner", choices=("sl", "m6"), default="sl",
+                        help="sl: sidings, A1 + B + A2 (default); m6: rest cells, the fast path first, then the fallback")
+    parser.add_argument("--rest-rule", choices=RULES, help="m6 only: the rest cells (default no-cut)")
+    parser.add_argument("--fast-path", action=argparse.BooleanOptionalAction, default=None,
+                        help="m6 only: the fast path first (default on; --no-fast-path: only the fallback, as M6a)")
     args = parser.parse_args(argv)
+    m6 = args.planner == "m6"
+    if m6 and args.sidings is not None:
+        parser.error("--sidings: m6 rests on the cells of its rest rule, not on sidings")
+    if not m6 and args.rest_rule is not None:
+        parser.error("--rest-rule: only --planner m6 has a rest rule")
+    if not m6 and args.fast_path is not None:
+        parser.error("--fast-path: only --planner m6 has a fast path")
     if args.vehicles < 1:
         parser.error(f"--vehicles must be >= 1, got {args.vehicles}")
     for name, value, ok in (("--rate", args.rate, args.rate >= 0), ("--warmup", args.warmup, args.warmup >= 0),
@@ -80,20 +95,22 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_map_config(args.config)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
-    text = args.sidings if args.sidings is not None else cfg.sidings
-    if text is None:
-        parser.error(f"{args.config}: no siding variant; give --sidings or a \"sidings\" key in the config")
-    try:
-        choice = parse_siding_choice(text)
-    except ValueError as exc:
-        parser.error(str(exc))
+    choice = None
+    if not m6:
+        text = args.sidings if args.sidings is not None else cfg.sidings
+        if text is None:
+            parser.error(f"{args.config}: no siding variant; give --sidings or a \"sidings\" key in the config")
+        try:
+            choice = parse_siding_choice(text)
+        except ValueError as exc:
+            parser.error(str(exc))
     print(f"loading {args.config} ...", flush=True)
     try:
         lw = load_world(args.config)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
     try:
-        candidates = candidates_of(lw, choice)
+        candidates = candidates_of(lw, choice) if choice is not None else ()
     except ValueError as exc:
         parser.error(str(exc))
     if len(set(lw.world.port_nodes)) < 2:
@@ -105,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as exc:
             parser.error(f"--fromto: {exc}")
 
-    sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, args.warmup, math.inf, args.dt, None, fromto)
+    sim_cfg = SimConfig(args.vehicles, args.rate, args.seed, args.warmup, math.inf, args.dt, None, fromto,
+                        planner=args.planner, rest_rule=args.rest_rule or "no-cut", fast_path=args.fast_path is not False)
     try:
         sim = Simulation(lw, candidates, sim_cfg)
     except GateError as err:

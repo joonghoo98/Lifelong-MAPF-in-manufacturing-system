@@ -13,20 +13,30 @@ def test_runnable_configs_are_the_maps_with_a_siding_variant():
 
 
 def test_blank_answers_take_the_defaults():
-    argv = build_argv(feed("", "", "", ""), lambda *a: None, CONFIGS)
+    argv = build_argv(feed("", "", "", "", ""), lambda *a: None, CONFIGS)
     assert argv == [str(CONFIGS / "mini_deadend.json"), "--vehicles", "8", "--rate", "2", "--seed", "0"]
 
 
 def test_bad_answers_are_asked_again():
     shown = []
-    argv = build_argv(feed("9", "2", "0", "x", "4", "-1", "1.5", "s", "3"), shown.append, CONFIGS)
+    argv = build_argv(feed("9", "2", "m7", "", "0", "x", "4", "-1", "1.5", "s", "3"), shown.append, CONFIGS)
     assert argv == [str(CONFIGS / "KAIROS_AMR.json"), "--vehicles", "4", "--rate", "1.5", "--seed", "3"]
-    assert sum("try again" in line for line in shown) == 5
+    assert sum("try again" in line for line in shown) == 6
+
+
+def test_m6_answers_add_the_planner_its_rest_rule_and_the_fast_path():  # user 2026-10-27: M6b in the viewer
+    kairos = str(CONFIGS / "KAIROS_AMR.json")
+    assert build_argv(feed("2", "m6", "", "", "20", "1", ""), lambda *a: None, CONFIGS) == \
+        [kairos, "--vehicles", "20", "--rate", "1", "--seed", "0", "--planner", "m6", "--rest-rule", "branch"]
+    shown = []
+    assert build_argv(feed("2", "M6", "x", "all", "maybe", "off", "", "", ""), shown.append, CONFIGS) == \
+        [kairos, "--vehicles", "8", "--rate", "2", "--seed", "0", "--planner", "m6", "--rest-rule", "all", "--no-fast-path"]
+    assert sum("try again" in line for line in shown) == 2
 
 
 def test_main_runs_the_viewer_with_the_answers():
     got = []
-    assert main(input_fn=feed("", "", "", ""), run=lambda argv: got.append(argv) or 0, root=CONFIGS) == 0
+    assert main(input_fn=feed("", "", "", "", ""), run=lambda argv: got.append(argv) or 0, root=CONFIGS) == 0
     assert got[0][1:3] == ["--vehicles", "8"]
 
 
@@ -50,17 +60,17 @@ def test_ctrl_c_or_end_of_input_ends_quietly(capsys):  # review: no traceback
 def test_a_gate_refusal_asks_again(capsys):  # review: too many vehicles for the map
     codes = iter([3, 0])
     got = []
-    assert main(input_fn=feed("2", "99", "", "", "", "", "", ""),
+    assert main(input_fn=feed("2", "", "99", "", "", "", "", "", "", ""),
                 run=lambda argv: got.append(argv) or next(codes), root=CONFIGS) == 0
     assert [a[2] for a in got] == ["99", "8"] and "try fewer vehicles or another map" in capsys.readouterr().out
 
 
 def test_words_get_a_plain_message():
     shown = []
-    build_argv(feed("abc", "", "abc", "", "abc", "", "abc", ""), shown.append, CONFIGS)
+    build_argv(feed("abc", "", "abc", "", "abc", "", "abc", "", "abc", ""), shown.append, CONFIGS)
     assert len(shown) > 4 and not any("invalid literal" in line or "could not convert" in line for line in shown)
 
 
 def test_the_keys_shown_include_the_stop_key(capsys):  # user 2026-10-22 (다)
-    main(input_fn=feed("", "", "", ""), run=lambda argv: 0, root=CONFIGS)
+    main(input_fn=feed("", "", "", "", ""), run=lambda argv: 0, root=CONFIGS)
     assert "E stop" in capsys.readouterr().out
