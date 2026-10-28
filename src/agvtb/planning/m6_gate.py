@@ -9,16 +9,19 @@ Theorem C (R26 §3; its T1..T4 are C1..C4 here) lets idle vehicles rest on the c
   C4  every port cell that is a cut cell lies within V - N edges of a station.
 V is the number of cells and N the number of vehicles. The verdicts are those of R26 check_c.theorem_c.
 The theorems also assume a map of two-way segments that join all its nodes (design §3); map_assumptions checks
-that first, and a map that breaks it is refused before its cells are built. Once they are, cell_facts checks the
-facts Theorem B uses besides the cell rule (R32 I-2), and cells that break one are refused too.
+that first, and state_facts the facts Lemma D (R34) takes from the states (D9, D12); a map that breaks one is
+refused before its cells are built. Once they are, cell_facts checks the facts Theorem B uses besides the cell rule
+(R32 I-2), and cells that break one are refused too.
 """
 from collections import deque
 from collections.abc import Collection
 from dataclasses import dataclass
 
+from agvtb.planning.intervals import EPS
+from agvtb.planning.reservations import affects
 from agvtb.world.cells import CellMap, dead_end_cells
 from agvtb.world.model import World
-from agvtb.world.states import Conflicts, StateGraph
+from agvtb.world.states import Conflicts, StateGraph, geom_key
 
 RULES = ("no-cut", "branch", "all")
 
@@ -105,6 +108,52 @@ def cell_facts(cm: CellMap, graph: StateGraph, conflicts: Conflicts, ports: Coll
         s, p = unloaded[0]
         out.append(f"cells: {len(unloaded)} stops cannot reach the L state of their port inside its cell, first {s} "
                    f"to port {p!r}")
+    return tuple(out)
+
+
+def state_facts(graph: StateGraph, conflicts: Conflicts) -> tuple[str, ...]:
+    """The facts Lemma D (R34) takes from the states that they break, each a line starting "states: ".
+
+    D9: every action (M, R or L) lasts longer than EPS; the config takes a dwell of 0 s. D12 (P): every M or R into a
+    stop collides with every other state that collides with the stop, by the TAPG's rule (the same geometric key, or
+    a conflict either way, tapg.py). Polygon and grid conflicts give (P) by construction; a profile is a table that
+    comes with the map. Empty when both hold.
+    """
+    out = []
+    short = sorted(sid for sid, st in graph.items() if st.kind in ("M", "R", "L") and st.duration_s <= EPS)
+    if short:
+        out.append(f"states: {len(short)} actions last {EPS:g} s or less (R34 D9), first {short[0]} "
+                   f"({graph[short[0]].duration_s:g} s)")
+    aff = {sid: frozenset(affects(conflicts, sid)) for sid in graph}
+    by_key: dict[str, set[str]] = {}  # geometric key -> the states that take it
+    hit_by: dict[str, set[str]] = {}  # geometric key -> the states whose affects hold it
+    for sid in graph:
+        by_key.setdefault(geom_key(sid), set()).add(sid)
+        for g in aff[sid]:
+            hit_by.setdefault(g, set()).add(sid)
+
+    def colliding(sid: str) -> set[str]:
+        g = geom_key(sid)
+        found = by_key.get(g, set()) | hit_by.get(g, set())
+        for g2 in aff[sid]:
+            found |= by_key.get(g2, set())
+        found.discard(sid)
+        return found
+
+    hits: dict[str, set[str]] = {}  # stop -> the states that collide with it
+    broken = []
+    for sid in sorted(graph):
+        if graph[sid].kind not in ("M", "R"):
+            continue
+        for s in graph[sid].next:
+            if graph[s].kind == "S":
+                if s not in hits:
+                    hits[s] = colliding(s)
+                broken += [(sid, s, x) for x in sorted(hits[s] - colliding(sid) - {sid})]
+    if broken:
+        m, s, x = broken[0]
+        out.append(f"states: {len(broken)} states collide with a stop but not with a move or turn into it "
+                   f"(R34 D12 (P)), first {x} with {s}, not {m}")
     return tuple(out)
 
 
@@ -251,7 +300,8 @@ class M6GateReport:
     n_rest: int
     longest_hop: int
     failed: tuple[str, ...]
-    map_violations: tuple[str, ...] = ()  # map_assumptions, else cell_facts; when there are some, C1..C4 were not judged
+    # map_assumptions, else state_facts, else cell_facts; when there are some, C1..C4 were not judged
+    map_violations: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -259,8 +309,8 @@ class M6GateReport:
 
     @property
     def violations(self) -> tuple[str, ...]:
-        """The map's or the cells' broken assumptions ("map: ...", "cells: ..."), then one line per failed condition,
-        each starting "Cn: "."""
+        """The broken assumptions of the map, its states or its cells ("map: ...", "states: ...", "cells: ..."), then
+        one line per failed condition, each starting "Cn: "."""
         room = self.n_cells - self.n_vehicles
         text = {
             "C1": f"{self.n_rest} rest cells for {self.n_vehicles} vehicles, or none of them is a station",

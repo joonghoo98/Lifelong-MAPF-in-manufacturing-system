@@ -2,8 +2,9 @@ from dataclasses import replace
 
 import pytest
 
+from agvtb.planning.intervals import EPS
 from agvtb.planning.m6_gate import (RULES, cell_facts, check_m6_gate, longest_hop, map_assumptions, rest_cells,
-                                    station_hops, theorem_c)
+                                    state_facts, station_hops, theorem_c)
 from agvtb.world.cells import build_cell_map, cell_map_from_graph
 from agvtb.world.loader import load_world
 from helpers import CONFIGS, SMALL_GRAPHS, evict_world, one_way_tiny_config, split_config, world_of_config
@@ -123,3 +124,27 @@ def test_cell_facts_find_conflicts_that_are_not_symmetric(tmp_path):  # R32 I-2:
     assert b not in lw.conflicts[a]
     found = cell_facts(cm, lw.graph, {**lw.conflicts, a: lw.conflicts[a] | {b}}, lw.world.port_nodes)
     assert len(found) == 1 and found[0].startswith("cells: ") and "not symmetric" in found[0] and a in found[0]
+
+
+def test_the_state_facts_hold_on_the_three_maps(built):  # R34 D9 · D12, user decision 2026-10-28
+    _, lw, _ = built
+    assert state_facts(lw.graph, lw.conflicts) == ()
+
+
+@pytest.mark.parametrize("kind,length", [("L", 0.0), ("M", 1e-12), ("R", EPS)])
+def test_state_facts_find_an_action_that_lasts_eps_or_less(tmp_path, kind, length):  # R34 D9; the config takes dwell 0
+    lw, _ = evict_world(tmp_path, "loop")
+    first = next(sid for sid in sorted(lw.graph) if lw.graph[sid].kind == kind)
+    found = state_facts({**lw.graph, first: replace(lw.graph[first], duration_s=length)}, lw.conflicts)
+    assert len(found) == 1 and found[0].startswith("states: ") and "D9" in found[0] and first in found[0]
+
+
+def test_state_facts_find_a_move_that_misses_what_its_stop_hits(tmp_path):  # R34 D12 (P)
+    lw, _ = evict_world(tmp_path, "loop")
+    m, s, x = "M,A,B", "S,B,0", "M,B,P"  # x takes node B, so on the grid rule it hits the stop s and the move m into s
+    assert s in lw.graph[m].next and x in lw.conflicts[s] and x in lw.conflicts[m]
+    assert state_facts(lw.graph, lw.conflicts) == ()
+    cut = {**lw.conflicts, m: lw.conflicts[m] - {x}, x: lw.conflicts[x] - {m}}
+    found = state_facts(lw.graph, cut)
+    assert len(found) == 1 and found[0].startswith("states: ") and "(P)" in found[0]
+    assert m in found[0] and s in found[0] and x in found[0] and found[0].startswith("states: 1 ")

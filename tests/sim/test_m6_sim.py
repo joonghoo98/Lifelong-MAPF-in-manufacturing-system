@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from agvtb.planning.gate import GateError
@@ -5,7 +7,7 @@ from agvtb.planning.m6_gate import RULES
 from agvtb.sim import simulator
 from agvtb.sim.simulator import SimConfig, Simulation, simulate
 from agvtb.world.loader import load_world
-from helpers import CONFIGS, one_way_tiny_config, split_config
+from helpers import CONFIGS, EVICT_MAPS, link_config, one_way_tiny_config, split_config
 
 
 @pytest.fixture(scope="module")
@@ -92,3 +94,13 @@ def test_the_m6_gate_refuses_maps_the_theorems_do_not_cover(tmp_path):  # final 
         with pytest.raises(GateError) as err:
             Simulation(load_world(make(tmp_path / sub)), (), SimConfig(1, 1.0, planner="m6", rest_rule="all"))
         assert not err.value.report.ok and err.value.report.violations[0].startswith("map: ")
+
+
+def test_the_m6_gate_refuses_a_map_whose_loads_take_no_time(tmp_path):  # R34 D9, user decision 2026-10-28
+    nodes, links, ports = EVICT_MAPS["loop"]
+    path = link_config(tmp_path, {n: (float(x), float(y)) for n, (x, y) in nodes.items()}, links, ports, "loop")
+    path.write_text(json.dumps(json.loads(path.read_text(encoding="utf-8")) | {"dwell_s": 0}), encoding="utf-8")
+    with pytest.raises(GateError) as err:
+        Simulation(load_world(path), (), SimConfig(1, 1.0, planner="m6", rest_rule="all"))
+    found = err.value.report.violations
+    assert not err.value.report.ok and len(found) == 1 and found[0].startswith("states: ") and "D9" in found[0]

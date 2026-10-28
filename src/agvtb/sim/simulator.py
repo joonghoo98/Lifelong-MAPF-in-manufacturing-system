@@ -17,7 +17,8 @@ from agvtb.planning.gate import GateError, GateReport, check_gate
 from agvtb.planning.intervals import INF
 from agvtb.planning.ledger import SidingLedger
 from agvtb.planning.m6_fallback import M6Fallback
-from agvtb.planning.m6_gate import M6GateReport, cell_facts, check_m6_gate, map_assumptions, rest_cells
+from agvtb.planning.m6_gate import (M6GateReport, cell_facts, check_m6_gate, map_assumptions, rest_cells,
+                                    state_facts)
 from agvtb.planning.offline import initial_stop
 from agvtb.planning.reservations import affects, path_constraints
 from agvtb.planning.rest_ledger import RestLedger
@@ -143,8 +144,8 @@ class Simulation:
         self.end = cfg.warmup_s + cfg.measure_s
         self.m6 = None
         if cfg.planner == "m6":
-            broken = map_assumptions(world)
-            if broken:  # the theorems do not cover this map; its cells may not even be built (final review I1)
+            broken = map_assumptions(world) or state_facts(self.graph, self.conflicts)
+            if broken:  # the theorems or Lemma D (R34) do not cover this map; its cells may not be built (final review I1)
                 self.gate = M6GateReport(cfg.rest_rule, cfg.n_vehicles, 0, 0, 0, (), broken)
                 raise GateError(self.gate)
             cells = build_cell_map(world, self.graph, self.conflicts)
